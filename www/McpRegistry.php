@@ -2,8 +2,8 @@
 
 abstract class McpRegistry {
     /**
-     * Tuto metodu implementujeö ty. 
-     * MusÌ vr·tit pole n·stroj˘ form·tovanÈ podle MCP standardu (JSON Schema).
+     * Tuto metodu implementuje≈° ty. 
+     * Mus√≠ vr√°tit pole n√°stroj≈Ø form√°tovan√© podle MCP standardu (JSON Schema).
      * @return array
      */
     abstract public function getTools(): array;
