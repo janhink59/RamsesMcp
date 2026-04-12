@@ -7,6 +7,8 @@ class Get_client_detail extends McpTool {
     
     /**
      * Vykoná SQL dotaz a vrátí data ve formátu TSV.
+     * * @param array{clientId?: string} $params Očekávané parametry (clientId je UUID)
+     * @return array
      */
     public function execute(array $params): array {
         // Kontrola vstupních parametrů (validace UUID proběhla v McpTool)

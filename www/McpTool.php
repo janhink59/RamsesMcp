@@ -10,6 +10,7 @@ abstract class McpTool {
 
 	/**
 	 * Konstruktor přijímá databázové spojení.
+     * * @param resource $db
 	 */
 	public function __construct($db) {
 		$this->db = $db;
@@ -18,6 +19,9 @@ abstract class McpTool {
 	/**
 	 * Hlavní validační logika volaná z index.php před samotným execute.
 	 * Kontroluje povinnost polí a validitu UUID.
+     * * @param array<string, mixed> $params Očekávané parametry (klíč => hodnota)
+     * @param array<int, array{param_name: string, param_type: string, is_required: int|bool}> $definitions Definice z DB
+     * @return array MCP formátovaná odpověď
 	 */
 	public function validateAndExecute(array $params, array $definitions): array {
 		foreach ($definitions as $def) {
@@ -42,11 +46,15 @@ abstract class McpTool {
 	/**
 	 * Samotná implementace logiky nástroje (SQL dotazy, transformace dat).
 	 * Musí být definována v každé podtřídě v adresáři /tools/.
+     * * @param array<string, mixed> $params
+     * @return array
 	 */
 	abstract public function execute(array $params): array;
 
 	/**
 	 * Formátuje úspěšný výsledek pro MCP protokol.
+     * * @param string $text
+     * @return array{content: array<int, array{type: string, text: string}>}
 	 */
 	protected function success(string $text): array {
 		return [
@@ -61,6 +69,8 @@ abstract class McpTool {
 
 	/**
 	 * Formátuje chybové hlášení tak, aby mu AI model rozuměl.
+     * * @param string $message
+     * @return array{isError: true, content: array<int, array{type: string, text: string}>}
 	 */
 	protected function error(string $message): array {
 		return [
