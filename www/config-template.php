@@ -17,7 +17,7 @@ return [
 			'PWD'                  => 'TvojeSilneHeslo',
 			'CharacterSet'         => 'UTF-8', 
 			'ReturnDatesAsStrings' => true,         // Zabrání problémům se serializací DateTime objektů v JSONu
-			'APP'                  => 'mcp_server', // Interní název uživatele pro nastavení kontextu (sp_set_session_context)
+			'APP'                  => 'Ramses', // Interní název uživatele pro nastavení kontextu (sp_set_session_context)
 		]
 	],
 	
