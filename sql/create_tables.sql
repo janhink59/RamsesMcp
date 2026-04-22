@@ -6,6 +6,7 @@ CREATE TABLE mcp_tool (
     mcp_tool UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     name VARCHAR(100) NOT NULL UNIQUE,
 	title varchar(100) default '' not null,
+	is_generic bit default 1 not null,
     description VARCHAR(MAX) NOT NULL
 );
 

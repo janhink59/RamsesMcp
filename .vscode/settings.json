@@ -1,2 +1,13 @@
 {
+	"files.encoding": "windows1250",
+	"files.autoGuessEncoding": true,
+	"files.insertFinalNewline": false,
+	"files.trimTrailingWhitespace": false,
+	"files.trimFinalNewlines": false,
+	"files.candidateGuessEncodings": [
+		"utf8",
+		"windows1250"
+	],
+	"files.eol": "auto",
+	"explorer.sortOrder": "modified"
 }

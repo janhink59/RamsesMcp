@@ -22,6 +22,7 @@ return [
 	],
 	
 	'auth' => [
+		'disabled' => true;
 		'bearer_token' => 'zde_vloz_tvuj_vygenerovany_nahodny_token_pro_mcp',
 	]
 ];
