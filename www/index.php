@@ -13,17 +13,22 @@ $parentDir  = dirname($virtualDir);
 
 set_include_path(get_include_path() . PATH_SEPARATOR . $parentDir);
 
-// Načtení závislostí
+// Globální časovač pro měření celkové doby trvání requestu (využito pro mcp_log)
+$startTime = microtime(true);
+
+// Načtení klíčových závislostí a sdílených knihoven
 require_once 'RamsesLib.php';
 require_once __DIR__ . '/db_connect.php';
 require_once __DIR__ . '/McpTool.php';
+require_once __DIR__ . '/McpGenericStoredProc.php';
 
 // ------------------------------------------------------------------
 // 1. DIAGNOSTICKÝ REŽIM (HTML)
 // ------------------------------------------------------------------
+// Diagnostika a Testovací UI se vyvolá přidáním parametru ?test do URL.
 if (isset($_GET['test'])) {
 	require_once __DIR__ . '/test.php';
-	exit; // Tímto se zpracování ukončí a vrací se pouze HTML
+	exit;                               // Tímto se zpracování ukončí a vrací se pouze interaktivní HTML dashboard
 }
 
 // ------------------------------------------------------------------
@@ -32,9 +37,16 @@ if (isset($_GET['test'])) {
 
 /**
  * Vynucuje odeslání validního JSON-RPC formátu a ukončuje skript.
- * HTTP kód je vždy 200 OK, aby Apache/PHP nevkládaly vlastní chybové HTML.
+ * Zároveň loguje kompletní request, response a trvání do tabulky mcp_log.
+ * HTTP kód je vždy 200 OK, aby Apache/PHP nevkládaly vlastní chybové HTML,
+ * které by rozbilo JSON parser v MCP klientovi.
+ * * @param string|int|null $id     Identifikátor požadavku (dle JSON-RPC specifikace)
+ * @param mixed           $result Výsledek úspěšného volání
+ * @param array|null      $error  Chybový objekt (pokud volání selhalo)
  */
 function sendResponse(string|int|null $id, mixed $result = null, ?array $error = null): never {
+	global $db, $rawInput, $request, $startTime;
+	
 	header('Content-Type: application/json; charset=utf-8');
 	
 	$response = [
@@ -48,7 +60,29 @@ function sendResponse(string|int|null $id, mixed $result = null, ?array $error =
 		$response["result"] = $result;
 	}
 
-	echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+	$jsonOutput = json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+	// Zápis do logovací tabulky mcp_log (pokud se úspěšně navázalo spojení s databází)
+	if (isset($db) && $db !== false) {
+		$durationMs = (int)round((microtime(true) - $startTime) * 1000);
+		$methodName = $request['method'] ?? 'unknown';
+		$isError    = $error !== null ? 1 : 0;
+		$reqIdStr   = (string)$id;
+		
+		$logSql = "INSERT INTO mcp_log (request_id, method, payload_in, payload_out, duration_ms, error_flag) 
+				   VALUES (?, ?, ?, ?, ?, ?)";
+		
+		sqlsrv_query($db, $logSql, [
+			$reqIdStr, 
+			$methodName, 
+			$rawInput ?? '', 
+			$jsonOutput, 
+			$durationMs, 
+			$isError
+		]);
+	}
+
+	echo $jsonOutput;
 	exit;
 }
 
@@ -59,25 +93,28 @@ if (!file_exists($configPath)) {
 }
 $config = require $configPath;
 
-// Kontrola autentizace (Bearer token)
-$headers = getallheaders();
-$authHeader = $headers['Authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+// Kontrola autentizace (Bearer token) s ohledem na bypass pro lokální vývoj
+$authDisabled = $config['auth']['disabled'] ?? false;
+$headers      = getallheaders();
+$authHeader   = $headers['Authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
 
-if (!str_starts_with($authHeader, 'Bearer ') || substr($authHeader, 7) !== $config['auth']['bearer_token']) {
-	// Záměrně nepoužíváme http_response_code(401), aby to Apache nepřepsal na HTML.
-	// Ollama uvidí chybu v tomto JSONu a pochopí ji.
-	sendResponse(null, null, [
-		"code"    => -32001, 
-		"message" => "Unauthorized: Neplatný nebo chybějící Bearer token."
-	]);
+if (!$authDisabled) {
+	if (!str_starts_with($authHeader, 'Bearer ') || substr($authHeader, 7) !== $config['auth']['bearer_token']) {
+		// Záměrně nepoužíváme http_response_code(401), aby to Apache nepřepsal na HTML.
+		// Ollama uvidí chybu v tomto JSONu a pochopí ji.
+		sendResponse(null, null, [
+			"code"    => -32001, 
+			"message" => "Unauthorized: Neplatný nebo chybějící Bearer token."
+		]);
+	}
 }
 
 // Hlavní smyčka zpracování MCP požadavku
 try {
-	// Připojení k databázi (pokud selže, vyhodí výjimku a chytíme ji dole)
+	// Připojení k databázi (pokud selže, vyhodí výjimku a chytíme ji dole v catch bloku)
 	$db = getMssqlConnection();
 
-	// Načtení těla JSON požadavku
+	// Načtení těla JSON požadavku ze standardního vstupu
 	$rawInput = file_get_contents('php://input');
 	
 	if (empty($rawInput)) {
@@ -93,82 +130,72 @@ try {
 	$requestId = $request['id'] ?? null;
 	$method    = $request['method'] ?? '';
 
-	// Vyřízení metody: listování nástrojů
+	// Vyřízení metody: listování nástrojů (Discovery fáze klienta)
 	if ($method === 'tools/list') {
-		$sql = "SELECT t.name, t.description, p.param_name, p.param_type, p.description AS param_desc, p.is_required
-				FROM mcp_tool t
-				LEFT JOIN mcp_tool_param p ON t.mcp_tool = p.mcp_tool
-				ORDER BY t.name";
+		require_once __DIR__ . '/McpRegistry.php';
+		$registry = new McpRegistry($db);
 		
-		$query = sqlsrv_query($db, $sql);
-		if ($query === false) throw new Exception("Chyba DB: " . print_r(sqlsrv_errors(), true));
-
-		$tools = [];
-		while ($row = sqlsrv_fetch_array($query, SQLSRV_FETCH_ASSOC)) {
-			$tName = $row['name'];
-			if (!isset($tools[$tName])) {
-				$tools[$tName] = [
-					"name"        => $tName,
-					"description" => $row['description'],
-					"inputSchema" => ["type" => "object", "properties" => [], "required" => []]
-				];
-			}
-			
-			if ($row['param_name']) {
-				$jsonType = ($row['param_type'] === 'number' || $row['param_type'] === 'bigint') ? 'number' : 'string';
-				$tools[$tName]['inputSchema']['properties'][$row['param_name']] = [
-					"type"        => $jsonType,
-					"description" => $row['param_desc']
-				];
-				if ($row['is_required']) {
-					$tools[$tName]['inputSchema']['required'][] = $row['param_name'];
-				}
-			}
-		}
-		sendResponse($requestId, ["tools" => array_values($tools)]);
+		// Registr zapouzdřuje složitou logiku načítání metadat a formátování do JSON Schema
+		sendResponse($requestId, ["tools" => $registry->getTools()]);
 	} 
-	// Vyřízení metody: volání nástroje
+	// Vyřízení metody: volání konkrétního nástroje s argumenty
 	elseif ($method === 'tools/call') {
 		$toolName = $request['params']['name'] ?? '';
 		$toolArgs = $request['params']['arguments'] ?? [];
 		
-		$pureName  = preg_replace('/[^a-zA-Z0-9_]/', '', $toolName);
-		$className = "Get_" . $pureName;
-		$classFile = __DIR__ . "/tools/" . $className . ".php";
+		// Zjištění informací o nástroji z databáze, především příznaku is_generic
+		$sqlTool  = "SELECT mcp_tool, is_generic FROM mcp_tool WHERE name = ?";
+		$stmtTool = sqlsrv_query($db, $sqlTool, [$toolName]);
+		$toolRow  = sqlsrv_fetch_array($stmtTool, SQLSRV_FETCH_ASSOC);
 
-		if (file_exists($classFile)) {
-			require_once $classFile;
-			
-			if (class_exists($className) && is_subclass_of($className, 'McpTool')) {
-				$sqlParams = "SELECT param_name, param_type, is_required FROM mcp_tool_param 
-							  WHERE mcp_tool = (SELECT mcp_tool FROM mcp_tool WHERE name = ?)";
-				$stmtParams = sqlsrv_query($db, $sqlParams, [$toolName]);
-				
-				$definitions = [];
-				while ($d = sqlsrv_fetch_array($stmtParams, SQLSRV_FETCH_ASSOC)) {
-					$definitions[] = $d;
-				}
-
-				/** @var McpTool $instance */
-				$instance = new $className($db);
-				$result = $instance->validateAndExecute($toolArgs, $definitions);
-				
-				sendResponse($requestId, $result);
-			}
+		if (!$toolRow) {
+			sendResponse($requestId, null, ["code" => -32601, "message" => "Nástroj '$toolName' není evidován v databázi."]);
 		}
+
+		// Načtení definic parametrů nástroje pro následnou typovou a povinnostní validaci
+		$sqlParams  = "SELECT param_name, param_type, is_required FROM mcp_tool_param WHERE mcp_tool = ?";
+		$stmtParams = sqlsrv_query($db, $sqlParams, [$toolRow['mcp_tool']]);
 		
-		sendResponse($requestId, null, [
-			"code"    => -32601, 
-			"message" => "Nástroj $className nebyl nalezen nebo chybí implementace."
-		]);
+		$definitions = [];
+		while ($d = sqlsrv_fetch_array($stmtParams, SQLSRV_FETCH_ASSOC)) {
+			$definitions[] = $d;
+		}
+
+		// Rozvětvení aplikační logiky na základě příznaku is_generic
+		if ($toolRow['is_generic']) {
+			// Nástroj je generický -> voláme dynamickou třídu obsluhující uloženou proceduru
+			$instance = new McpGenericStoredProc($db, $toolName, $definitions);
+			$result   = $instance->validateAndExecute($toolArgs, $definitions);
+			sendResponse($requestId, $result);
+		} else {
+			// Nástroj je specifický -> hledáme konkrétní PHP třídu na disku (prefix Get_)
+			$pureName  = preg_replace('/[^a-zA-Z0-9_]/', '', $toolName);
+			$className = "Get_" . $pureName;
+			$classFile = __DIR__ . "/tools/" . $className . ".php";
+
+			if (file_exists($classFile)) {
+				require_once $classFile;
+				
+				if (class_exists($className) && is_subclass_of($className, 'McpTool')) {
+					/** @var McpTool $instance */
+					$instance = new $className($db);
+					$result   = $instance->validateAndExecute($toolArgs, $definitions);
+					sendResponse($requestId, $result);
+				}
+			}
+			
+			// Pokud fyzický skript nebo třída neexistuje, vracíme specifikovanou JSON-RPC chybu
+			sendResponse($requestId, null, ["code" => -32601, "message" => "Nástroj $className nebyl nalezen nebo chybí implementace."]);
+		}
 	} 
-	// Neznámá metoda
+	// Neznámá metoda, kterou tento server nepodporuje
 	else {
 		sendResponse($requestId, null, ["code" => -32601, "message" => "Metoda '$method' není podporována."]);
 	}
 
 } catch (Throwable $e) {
-	// Globální zachytávání chyb - zaručuje, že ven vypadne vždy jen JSON
+	// Globální zachytávání chyb - zaručuje, že klient vždy dostane validní JSON odpověď.
+	// K záznamu do mcp_log tabulky dojde automaticky v rámci funkce sendResponse.
 	sendResponse($requestId ?? null, null, [
 		"code"    => -32000, 
 		"message" => "Server Error: " . $e->getMessage()
