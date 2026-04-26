@@ -10,10 +10,33 @@ declare(strict_types=1);
 
 header('Content-Type: text/html; charset=utf-8');
 
+// --- 1. KONTROLA POVOLENÝCH IP ADRES (WHITELIST) ---
+$config    = require __DIR__ . '/config.php';
+$whitelist = $config['auth']['info_from_ip'] ?? [];
+
+// Získání IP adresy (dle požadavku zachováváme případný vícesložkový string z proxy)
+$clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+
+// Logika propouštění: 
+// Pustíme pouze localhost nebo adresy explicitně uvedené ve whitelistu.
+// Pokud je whitelist prázdný, je přístup zvenčí kompletně zablokován.
+if (!in_array($clientIp, $whitelist, true)) {
+	http_response_code(403);
+	echo "<!DOCTYPE html>\n<html lang=\"cs\">\n<head>\n\t<meta charset=\"UTF-8\">\n\t<title>Přístup odepřen</title>\n</head>\n";
+	echo "<body style=\"font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; text-align: center; padding-top: 100px;\">\n";
+	echo "\t<div style=\"background: white; max-width: 600px; margin: 0 auto; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border-top: 5px solid #d93025;\">\n";
+	echo "\t\t<h2 style=\"color: #d93025; margin-top: 0;\">Odepřen přístup</h2>\n";
+	echo "\t\t<p>Z vaší aktuální IP adresy není povoleno prohlížet diagnostické informace.</p>\n";
+	echo "\t\t<p style=\"background: #fff5f5; border: 1px solid #feb2b2; padding: 10px; border-radius: 6px; font-weight: bold;\">Identifikovaný IP string: <br><code style=\"color: #c53030;\">" . htmlspecialchars($clientIp) . "</code></p>\n";
+	echo "\t\t<p style=\"font-size: 0.9em; color: #718096;\">Pro povolení přístupu zkopírujte tento řetězec do pole <code>info_from_ip</code> v souboru <code>config.php</code>.</p>\n";
+	echo "\t</div>\n</body>\n</html>";
+	exit;
+}
+// --- KONEC KONTROLY IP ---
+
 require_once __DIR__ . '/db_interface.php';
 
 // Načtení konfigurace pro kontrolu stavu autentizace v UI
-$config        = require __DIR__ . '/config.php';
 $expectedToken = $config['auth']['bearer_token'] ?? '';
 $authDisabled  = $config['auth']['disabled'] ?? false;
 
@@ -72,6 +95,10 @@ try {
 		
 		/* Stylování predikovaného kódu */
 		.code-template { background: #1a202c; color: #e2e8f0; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Cascadia Code', Consolas, monospace; font-size: 0.9rem; line-height: 1.4; margin-top: 10px; tab-size: 4; }
+
+		/* Speciální zobrazení tokenu */
+		.token-display { cursor: pointer; background: #edf2f7; padding: 2px 6px; border-radius: 4px; font-family: monospace; border: 1px dashed #cbd5e0; }
+		.token-display:hover { background: #e2e8f0; }
 	</style>
 </head>
 <body>
@@ -80,12 +107,18 @@ try {
 		<h1>🔍 RamsesMcp Info Dashboard</h1>
 		<div class="status-box">
 			<p><strong>Stav DB:</strong> <span class="<?php echo $dbClass; ?>"><?php echo htmlspecialchars($dbStatus); ?></span></p>
+			<p><strong>Vaše IP:</strong> <code><?php echo htmlspecialchars($clientIp); ?></code> <small style="color: #718096;">(pro whitelist v config.php)</small></p>
 			<p><strong>Autentizace:</strong> 
 				<?php if ($authDisabled): ?>
 					<span class="ok">VYPNUTA (Bypass pro vývoj)</span>
 				<?php else: ?>
 					<span class="ok">ZAPNUTA (Bearer token vyžadován)</span>
 				<?php endif; ?>
+			</p>
+			<p><strong>Bearer Token:</strong> 
+				<span class="token-display" title="Klikněte pro zobrazení" onclick="this.innerText='<?php echo htmlspecialchars($expectedToken); ?>'; this.onclick=null;">
+					[ Klikněte pro zobrazení tokenu ]
+				</span>
 			</p>
 		</div>
 	</div>

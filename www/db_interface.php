@@ -197,6 +197,13 @@ class db_interface {
 					$schema['inputSchema']['required'][] = $pName;
 				}
 			}
+
+			// OPRAVA PRO TS/ZOD VALIDÁTORY: Pokud nástroj nemá parametry, PHP udìlá z prázdného pole
+			// JSON pole []. Zod ale striktnì oèekává JSON objekt {}. Pøetypujeme to pøes stdClass().
+			if (empty($schema['inputSchema']['properties'])) {
+				$schema['inputSchema']['properties'] = new stdClass();
+			}
+
 			$schemaList[] = $schema;
 		}
 
