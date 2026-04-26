@@ -5,6 +5,7 @@ drop procedure if exists mcp_tool_threats
 drop procedure if exists mcp_tool_threat_impact
 drop procedure if exists mcp_tool_user_by_name
 drop procedure if exists mcp_tool_threat_impact
+drop procedure if exists mcp_tool_organization_for_user
 GO
 create procedure mcp_tool_threats
 as
@@ -42,7 +43,28 @@ BEGIN
 	SELECT 'Logika zatím není implementována' AS Status;
 END
 GO
+CREATE PROCEDURE mcp_tool_organization_for_user
+	@login NVARCHAR(MAX)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	select ru.login
+		,o.name
+		,ou.right_orgadmin
+		,ou.right_reader
+		,o.disabled oorganization_is_disabled
+	from ramses_user ru
+		join org_user ou on ou.ramses_user=ru.ramses_user
+			and ou.disabled=0
+		join organization o on o.organization=ou.organization
+	where ru.login=@login
+	order by 1,2
+
+END
+GO
+GO
 -- test funkce
 execute debuglogin 'mcp_server'
-execute mcp_tool_user_by_name 'Hink'
+execute mcp_tool_organization_for_user 'hink'
 GO

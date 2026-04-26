@@ -22,7 +22,8 @@ return [
 	],
 	
 	'auth' => [
-		'disabled' => true;
 		'bearer_token' => 'zde_vloz_tvuj_vygenerovany_nahodny_token_pro_mcp',
+		// Seznam IP adres, ze kterých je povoleno ladit MCP server (stránky info.php a test_exec.php)
+		'info_from_ip' => [],
 	]
 ];
