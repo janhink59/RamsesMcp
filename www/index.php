@@ -8,8 +8,7 @@ declare(strict_types=1);
  * - mode=main : (Výchozí) Jádro pro zpracování standardních JSON-RPC MCP požadavků (Ollama).
  * - mode=info : Vrací interaktivní HTML dashboard s přehledem nástrojů pro zobrazení v běžném prohlížeči
  * - mode=test : Endpoint pro asynchronní spouštění testů z dashboardu "info".
- * 
- * Globální kontext ($config):
+ * * Globální kontext ($config):
  * Očekává se struktura z config.php, případně přepsaná HTTP hlavičkami (X-Mcp-*):
  * - ['db']['server']              (string) IP nebo název MSSQL serveru
  * - ['db']['options']['Database'] (string) Název cílové databáze
@@ -17,11 +16,23 @@ declare(strict_types=1);
  * - ['mcp']['password']           (string) Heslo z hlavičky/konfigu
  */
 
-// Načtení základní konfigurace do normální globální proměnné
+// 1. Start bufferingu - zachytí mezery, BOM nebo chyby z configu
+ob_start();
+
+// Zjištění požadovaného režimu z URL. Pokud chybí, defaultuje na 'main'.
+$mode = $_GET['mode'] ?? 'main';
+
+// Nastavení error reportingu pro režim main - chceme čistý JSON, ne HTML chyby
+if ($mode === 'main') {
+	ini_set('display_errors', '0');
+	error_reporting(E_ALL);
+}
+
+// 2. Načtení základní konfigurace do normální globální proměnné
 // Očekává se, že config.php vrací pole (stejná struktura jako config-template.php)
 $config = require_once __DIR__ . '/config.php';
 
-// Přepis konfigurace pomocí HTTP hlaviček z Page Assist (pokud jsou dostupné)
+// 3. Přepis konfigurace pomocí HTTP hlaviček z Page Assist (pokud jsou dostupné)
 // V PHP se vlastní hlavičky X-Mcp-* mapují do pole $_SERVER s prefixem HTTP_X_MCP_*
 if (isset($_SERVER['HTTP_X_MCP_DBSERVER']) && trim($_SERVER['HTTP_X_MCP_DBSERVER']) !== '') {
 	$config['db']['server']              = trim($_SERVER['HTTP_X_MCP_DBSERVER']);  // Přepis nastavení MSSQL serveru
@@ -40,28 +51,28 @@ if (isset($_SERVER['HTTP_X_MCP_PASS']) && trim($_SERVER['HTTP_X_MCP_PASS']) !== 
 }
 
 // Nastavení základních cest pro případné sdílené knihovny
-
 $virtualDir = dirname($_SERVER['SCRIPT_FILENAME']);
 $parentDir  = dirname($virtualDir); 
 
 set_include_path(get_include_path() . PATH_SEPARATOR . $parentDir);
 
-// Zjištění požadovaného režimu z URL. Pokud chybí, defaultuje na 'main'.
-$mode = $_GET['mode'] ?? 'main';
-
-// Delegování na příslušný obslužný skript
+// 4. Delegování na příslušný obslužný skript
 switch ($mode) {
 	case 'info':
+		// Spláchnutí bufferu do výstupu (pro HTML dashboard je případný text neškodný)
+		ob_end_flush();
 		require_once __DIR__ . '/info.php';
 		break;
 
 	case 'test':
+		ob_end_flush();
 		require_once __DIR__ . '/test_exec.php';
 		break;
 
 	case 'main':
 	default:
-		// Základní logika JSON-RPC je přesunuta do zdrojáku main.php
+		// Kritický krok: Před přechodem do main.php smažeme veškerý textový balast z bufferu!
+		ob_clean();
 		require_once __DIR__ . '/main.php';
 		break;
 }

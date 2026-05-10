@@ -9,6 +9,19 @@ declare(strict_types=1);
  * a jsou dostupné v globální promìnné $config.
  */
 
+// --- CORS a podpora HTTP hlavièek z klienta (napø. Page Assist) ---
+// Webový klient (prohlížeè) pøi detekci vlastních hlavièek pošle nejprve OPTIONS dotaz.
+// Musíme mu øíct, že naše hlavièky X-Mcp-* jsou výslovnì povoleny, jinak požadavek zahodí.
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, X-Mcp-User, X-Mcp-Pass, X-Mcp-Dbserver, X-Mcp-Database");
+
+// Rychlé vyøízení preflight OPTIONS požadavku (bez spouštìní databázové logiky)
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+	http_response_code(200);
+	exit;
+}
+
 $startTime = microtime(true);
 require_once __DIR__ . '/db_interface.php';
 
@@ -56,6 +69,7 @@ try {
 			]
 		], null, $dbi);
 	} elseif ($method === 'notifications/initialized') {
+		// Upozornìní od klienta, že inicializace probìhla. Nevrací se standardní JSON-RPC odpovìï.
 		exit;
 	} elseif ($method === 'ping') {
 		sendResponse($requestId, new stdClass(), null, $dbi);
