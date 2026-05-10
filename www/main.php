@@ -3,13 +3,19 @@ declare(strict_types=1);
 
 /**
  * main.php - MCP Jádro pro JSON-RPC (AI klienti)
- * Zajišuje autentizaci z ENV hlavièek a deleguje logiku na db_interface.
+ * Verze 2.1 - Integrace s globální konfigurací a routerem index.php.
+ * * KONTEXT: Tento soubor je inkludován z index.php v režimu 'main'.
+ * Identita uživatele a nastavení DB již byly zpracovány v index.php
+ * a jsou dostupné v globální promìnné $config.
  */
 
 $startTime = microtime(true);
 require_once __DIR__ . '/db_interface.php';
 
-// 1. Získání a parsování payloadu (MUSÍ BÝT PRVNÍ, abychom znali ID)
+// Zpøístupnìní globální konfigurace z index.php
+global $config;
+
+// 1. Získání a parsování payloadu (MUSÍ BÝT PRVNÍ, abychom znali ID požadavku pro logování)
 $rawInput = file_get_contents('php://input');
 $request  = json_decode($rawInput, true);
 
@@ -20,23 +26,24 @@ if (json_last_error() !== JSON_ERROR_NONE || !is_array($request)) {
 $requestId = $request['id'] ?? null;
 $method    = $request['method'] ?? '';
 
-// 2. Vytvoøení instance rozhraní (Tím se otevøe fyzické DB pøipojení)
+// 2. Vytvoøení instance rozhraní (Tím se otevøe fyzické DB pøipojení pøes Singleton)
 $dbi = new db_interface();
 
-// 3. Extrakce identity z prostøedí klienta (Page Assist) a Autentizace
-$user = $_SERVER['MCP_USER'] ?? $_SERVER['HTTP_X_MCP_USER'] ?? '';
-$pass = $_SERVER['MCP_PASS'] ?? $_SERVER['HTTP_X_MCP_PASS'] ?? '';
+// 3. Extrakce identity z globální konfigurace a Autentizace
+// Router v index.php již vyøešil pøepisy z HTTP hlavièek do pole $config
+$user = $config['mcp']['user'] ?? '';
+$pass = $config['mcp']['password'] ?? '';
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 
 try {
 	if (empty($user) || empty($pass)) {
-		throw new Exception("Unauthorized - Chybí pøihlašovací údaje (MCP_USER, MCP_PASS). Ujistìte se, že klient odesílá tyto hlavièky.");
+		throw new Exception("Unauthorized - Chybí pøihlašovací údaje. Ujistìte se, že klient odesílá hlavièky X-Mcp-User a X-Mcp-Pass.");
 	}
 
-	// Provedeme autentizaci na stávajícím SPID v rámci $dbi
+	// Provedeme logickou autentizaci (set_login) v DB pro aktuální spojení
 	$dbi->authenticate($user, $pass, $ip);
 
-	// 4. Zpracování samotného MCP požadavku
+	// 4. Zpracování samotného MCP požadavku (JSON-RPC metody)
 	if ($method === 'initialize') {
 		sendResponse($requestId, [
 			"protocolVersion" => "2024-11-05",
@@ -44,8 +51,8 @@ try {
 				"tools" => new stdClass()
 			],
 			"serverInfo" => [
-				"name" => "RamsesMcp",
-				"version" => "2.0.0"
+				"name" => $config['mcp']['name'] ?? "RamsesMcp",
+				"version" => $config['mcp']['version'] ?? "2.0.0"
 			]
 		], null, $dbi);
 	} elseif ($method === 'notifications/initialized') {
@@ -53,8 +60,10 @@ try {
 	} elseif ($method === 'ping') {
 		sendResponse($requestId, new stdClass(), null, $dbi);
 	} elseif ($method === 'tools/list') {
+		// Vrací seznam nástrojù ve formátu JSON Schema
 		sendResponse($requestId, ["tools" => $dbi->getToolsForMain()], null, $dbi);
 	} elseif ($method === 'tools/call') {
+		// Spuštìní konkrétního nástroje a vrácení výsledku v TSV
 		$dbi->executeTool($request['params']['name'] ?? '', $request['params']['arguments'] ?? []);
 		sendResponse($requestId, $dbi->getResponseAsMcpJson(), null, $dbi);
 	} else {
@@ -66,7 +75,7 @@ try {
 }
 
 /**
- * Zabalí výstup do striktního JSON-RPC 2.0 formátu.
+ * Zabalí výstup do striktního JSON-RPC 2.0 formátu a provede zápis do DB logu.
  */
 function sendResponse($id, $result, $error, $dbi) {
 	global $startTime, $rawInput, $request;
@@ -88,9 +97,17 @@ function sendResponse($id, $result, $error, $dbi) {
 	
 	$out = json_encode($resp, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 	
+	// Logování požadavku do tabulky mcp_log (pokud je k dispozici DB rozhraní)
 	$logId = is_scalar($id) ? (string)$id : 'null';
 	if ($dbi !== null && isset($request['method'])) {
-		$dbi->logRequest($logId, $request['method'], $rawInput, $out, (int)round((microtime(true) - $startTime) * 1000), $error !== null);
+		$dbi->logRequest(
+			$logId, 
+			$request['method'], 
+			$rawInput, 
+			$out, 
+			(int)round((microtime(true) - $startTime) * 1000), 
+			$error !== null
+		);
 	}
 	
 	echo $out; 

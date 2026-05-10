@@ -3,10 +3,8 @@ declare(strict_types=1);
 
 /**
  * info.php - Diagnostický dashboard projektu RamsesMcp.
- * Verze 2.2 - Plná integrace do routeru index.php.
- * Slouží k přehledu nástrojů, jejich testování a generování šablon.
- * * KONTEXT: Tento soubor je inkludován z index.php, kde již proběhla
- * inicializace a případná modifikace globální proměnné $config.
+ * Verze 2.3 - Přidáno ověření identity (set_login) a oprava asynchronních volání.
+ * * KONTEXT: Tento soubor je inkludován z index.php. Používá globální $config.
  */
 
 header('Content-Type: text/html; charset=utf-8');
@@ -18,18 +16,29 @@ require_once __DIR__ . '/db_interface.php';
 require_once __DIR__ . '/db_connect.php'; 
 
 try {
-	// Validace přítomnosti konfigurace
 	if (!isset($config)) {
-		throw new Exception("Globální konfigurace nebyla nalezena. info.php musí být voláno přes index.php.");
+		throw new Exception("Kritická chyba: Globální konfigurace \$config nebyla nalezena. info.php musí být voláno přes index.php.");
 	}
 
-	// Inicializace rozhraní a načtení struktury nástrojů
-	// db_interface si sám vytáhne $config a připojí se k MSSQL
-	$dbi      = new db_interface();
+	$dbi = new db_interface();
+
+	// NASTAVENÍ KONTEXTU: Ověříme, zda funguje login uživatele definovaného v konfiguraci
+	// (Využívá klíče 'user' a 'password' dle config-template.php)
+	$user = $config['mcp']['user'] ?? '';
+	$pass = $config['mcp']['password'] ?? '';
+	$ip   = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+
+	if (empty($user) || empty($pass)) {
+		throw new Exception("V konfiguraci chybí údaje pro MCP autentizaci (user/password).");
+	}
+
+	// Pokud set_login selže, vyhodí authenticate() výjimku, která se zachytí v catch bloku
+	$dbi->authenticate($user, $pass, $ip);
+
 	$data     = $dbi->getToolsForInfo();
 	$tools    = $data['tools'];
 	$params   = $data['params'];
-	$dbStatus = "✅ OK - Připojeno k MSSQL";
+	$dbStatus = "✅ OK - Připojeno a autentizováno jako '$user'";
 	$dbClass  = "ok";
 } catch (Throwable $e) {
 	$dbStatus = "❌ Chyba: " . $e->getMessage();
@@ -71,11 +80,10 @@ try {
 	<div class="card">
 		<h1>🔍 RamsesMcp Info Dashboard</h1>
 		<div class="status-box">
-			<p><strong>Stav DB:</strong> <span class="<?php echo $dbClass; ?>"><?php echo htmlspecialchars($dbStatus); ?></span></p>
+			<p><strong>Stav autentizace:</strong> <span class="<?php echo $dbClass; ?>"><?php echo htmlspecialchars($dbStatus); ?></span></p>
 			<p><strong>Server:</strong> <code><?php echo htmlspecialchars($config['db']['server'] ?? '---'); ?></code></p>
 			<p><strong>Databáze:</strong> <code><?php echo htmlspecialchars($config['db']['options']['Database'] ?? '---'); ?></code></p>
-			<p><strong>Verze MCP:</strong> <code><?php echo htmlspecialchars($config['mcp']['version'] ?? '2.0.0'); ?></code></p>
-			<p><strong>Uživatel pro kontext:</strong> <code><?php echo htmlspecialchars($config['mcp']['user'] ?? '---'); ?></code></p>
+			<p><strong>Verze MCP:</strong> <code><?php echo htmlspecialchars($config['mcp']['version'] ?? '---'); ?></code></p>
 		</div>
 	</div>
 
@@ -169,9 +177,9 @@ try {
 		async function runTest(name) {
 			const resDiv = document.getElementById('response_' + name);
 			const formData = new FormData(document.getElementById('form_' + name));
-			resDiv.innerHTML = "⏳ Volám test_exec.php skrze index.php...";
+			resDiv.innerHTML = "⏳ Volám test_exec.php přes index.php...";
 			try {
-				// Voláme test_exec přes router, abychom zachovali kontext a hlavičky
+				// DŮLEŽITÉ: Voláme index.php, aby se uplatnil router a globální konfigurace
 				const response = await fetch('index.php?mode=test', { method: 'POST', body: formData });
 				resDiv.innerHTML = await response.text();
 			} catch (e) {

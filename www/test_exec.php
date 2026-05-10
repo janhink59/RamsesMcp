@@ -3,40 +3,40 @@ declare(strict_types=1);
 
 /**
  * test_exec.php - Endpoint pro asynchronní testy z info.php.
- * Pøijímá POST data, provádí autentizaci a vrací HTML tabulku výsledku.
+ * Verze 2.2 - Plná integrace do globální konfigurace.
  */
 
 require_once __DIR__ . '/db_interface.php';
+
+global $config; // Využíváme konfiguraci pøipravenou v index.php
 
 try {
 	$toolName = $_POST['tool_name'] ?? '';
 	$toolArgs = $_POST['params'] ?? [];
 	
-	// Testovací údaje z konfigurace (fallback)
-	$configPath = __DIR__ . '/config.php';
-	if (!file_exists($configPath)) {
-		throw new Exception("Konfiguraèní soubor config.php nebyl nalezen.");
+	if (!isset($config['mcp'])) {
+		throw new Exception("Konfigurace MCP nebyla nalezena.");
 	}
-	$config = require $configPath;
-	
-	$user = $config['mcp']['test_user'] ?? '';
-	$pass = $config['mcp']['test_password'] ?? '';
+
+	// Používáme standardní klíèe 'user' a 'password' z naší šablony
+	$user = $config['mcp']['user'] ?? '';
+	$pass = $config['mcp']['password'] ?? '';
 	$ip   = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 
 	if (empty($user) || empty($pass)) {
-		throw new Exception("V config.php chybí údaje test_user a test_password nezbytné pro diagnostiku.");
+		throw new Exception("V konfiguraci chybí pøihlašovací údaje (user/password).");
 	}
 
-	// 1. Otevøení spojení s databází
+	// 1. Inicializace DBI (využívá globální $config)
 	$dbi = new db_interface();
 	
-	// 2. Nastavení kontextu v DB (pøihlášení)
+	// 2. Nastavení kontextu v DB (set_login)
 	$dbi->authenticate($user, $pass, $ip);
 
-	// 3. Vykonání nástroje (internì provede validaci a kontrolu is_authenticated)
+	// 3. Vykonání nástroje
 	$dbi->executeTool($toolName, $toolArgs);
 
-	// Vracíme èisté HTML, které JavaScript vloží do pøíslušného divu
+	// 4. Vrácení HTML výsledku pro AJAX v info.php
 	echo $dbi->getResponseAsHtml();
 
 } catch (Throwable $e) {
