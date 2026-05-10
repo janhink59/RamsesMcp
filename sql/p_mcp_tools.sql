@@ -6,6 +6,9 @@ drop procedure if exists mcp_tool_threat_impact
 drop procedure if exists mcp_tool_user_by_name
 drop procedure if exists mcp_tool_threat_impact
 drop procedure if exists mcp_tool_organization_for_user
+drop procedure if exists mcp_tool_get_user_context
+drop procedure if exists mcp_tool_set_organization
+set nocount on
 GO
 create procedure mcp_tool_threats
 as
@@ -51,6 +54,7 @@ BEGIN
 
 	select ru.login
 		,o.name
+		,o.organization_uuid organization_guid
 		,ou.right_orgadmin
 		,ou.right_reader
 		,o.disabled oorganization_is_disabled
@@ -63,8 +67,30 @@ BEGIN
 
 END
 GO
+create procedure mcp_tool_get_user_context
+as
+select s.user_login
+	,convert(varchar(40),s.organization_uuid) UUID
+	,o.name organization_name
+	,r.name review_name
+	,r.language
+from dbsession s
+	join organization o on o.organization=s.organization
+	left outer join crr_review r on r.crr_review=s.crr_review
+where spid=@@spid
+GO
+create procedure mcp_tool_set_organization @organization_guid uuid
+as
+set nocount on
+declare @uid bigint
+select @uid=o.organization from organization o where o.organization_uuid=@organization_guid
+execute wwwr_setorganization @uid, 1
+execute mcp_tool_get_user_context
+--select 'A' msg
 GO
 -- test funkce
-execute debuglogin 'mcp_server'
+begin tran
+execute debuglogin 'hink'
 execute mcp_tool_organization_for_user 'hink'
+rollback
 GO

@@ -192,6 +192,7 @@ class db_interface {
 				}
 			}
 
+			// Pro Ollama/Page Assist: Pokud nástroj nemá parametry, properties musí být {} (stdClass), nikoliv []
 			if (empty($schema['inputSchema']['properties'])) {
 				$schema['inputSchema']['properties'] = new stdClass();
 			}
@@ -247,7 +248,7 @@ class db_interface {
 			return false;
 		}
 
-		$toolDefs = $this->mcp_tool_params[$tool_name];
+		$toolDefs = $this->mcp_tool_params[$tool_name] ?? [];
 		$toolMeta = $this->mcp_tool_list[$tool_name];
 		
 		// 2. Striktní validace vstupů před odesláním do DB/třídy
@@ -275,24 +276,28 @@ class db_interface {
 			$sqlParams = [];
 			$sqlArgs   = [];
 
-			foreach ($toolDefs as $def) {
-				$pName = $def['param_name'];
-				$val   = $params[$pName] ?? null;
+			// Sestavení parametrů pouze pokud jsou nějaké definovány
+			if (!empty($toolDefs)) {
+				foreach ($toolDefs as $def) {
+					$pName = $def['param_name'];
+					$val   = $params[$pName] ?? null;
 
-				if ($val === null || $val === '') {
-					$sqlParams[] = "@{$pName} = NULL";
-				} else {
-					if ($def['param_type'] === 'uuid') {
-						$hex = str_replace('-', '', $val);
-						$sqlParams[] = "@{$pName} = 0x{$hex}";
+					if ($val === null || $val === '') {
+						$sqlParams[] = "@{$pName} = NULL";
 					} else {
-						$sqlParams[] = "@{$pName} = ?";
-						$sqlArgs[]   = $val;
+						if ($def['param_type'] === 'uuid') {
+							$hex = str_replace('-', '', $val);
+							$sqlParams[] = "@{$pName} = 0x{$hex}";
+						} else {
+							$sqlParams[] = "@{$pName} = ?";
+							$sqlArgs[]   = $val;
+						}
 					}
 				}
 			}
 
-			$sql  = "EXEC " . $procName . " " . implode(', ', $sqlParams);
+			// Finální SQL: Pokud nejsou parametry, výsledkem je "EXEC mcp_tool_nazev" bez mezer a čárek
+			$sql = "EXEC " . $procName . (!empty($sqlParams) ? " " . implode(', ', $sqlParams) : "");
 			$stmt = sqlsrv_query($this->db, $sql, $sqlArgs);
 
 			if ($stmt === false) {
@@ -331,7 +336,7 @@ class db_interface {
 
 			/** @var McpTool $instance */
 			$instance = new $className($this->db);
-			$result = $instance->execute($params);
+			$result = $instance->execute($params ?? []);
 
 			if (isset($result['isError']) && $result['isError']) {
 				$this->last_error = $result['content'][0]['text'] ?? 'Neznámá chyba v custom nástroji.';
