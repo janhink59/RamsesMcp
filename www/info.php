@@ -3,18 +3,28 @@ declare(strict_types=1);
 
 /**
  * info.php - Diagnostický dashboard projektu RamsesMcp.
- * Verze 2.1 - Plná závislost na config.php, odstraněna správa identity v UI.
+ * Verze 2.2 - Plná integrace do routeru index.php.
  * Slouží k přehledu nástrojů, jejich testování a generování šablon.
+ * * KONTEXT: Tento soubor je inkludován z index.php, kde již proběhla
+ * inicializace a případná modifikace globální proměnné $config.
  */
 
 header('Content-Type: text/html; charset=utf-8');
 
+// Použijeme globální konfiguraci z index.php
+global $config;
+
 require_once __DIR__ . '/db_interface.php';
 require_once __DIR__ . '/db_connect.php'; 
-$config = require __DIR__ . '/config.php';
 
 try {
+	// Validace přítomnosti konfigurace
+	if (!isset($config)) {
+		throw new Exception("Globální konfigurace nebyla nalezena. info.php musí být voláno přes index.php.");
+	}
+
 	// Inicializace rozhraní a načtení struktury nástrojů
+	// db_interface si sám vytáhne $config a připojí se k MSSQL
 	$dbi      = new db_interface();
 	$data     = $dbi->getToolsForInfo();
 	$tools    = $data['tools'];
@@ -62,8 +72,10 @@ try {
 		<h1>🔍 RamsesMcp Info Dashboard</h1>
 		<div class="status-box">
 			<p><strong>Stav DB:</strong> <span class="<?php echo $dbClass; ?>"><?php echo htmlspecialchars($dbStatus); ?></span></p>
-			<p><strong>Verze:</strong> <code><?php echo htmlspecialchars($config['mcp']['version'] ?? '2.0.0'); ?></code></p>
-			<p><strong>Testovací uživatel:</strong> <code><?php echo htmlspecialchars($config['mcp']['test_user'] ?? '---'); ?></code></p>
+			<p><strong>Server:</strong> <code><?php echo htmlspecialchars($config['db']['server'] ?? '---'); ?></code></p>
+			<p><strong>Databáze:</strong> <code><?php echo htmlspecialchars($config['db']['options']['Database'] ?? '---'); ?></code></p>
+			<p><strong>Verze MCP:</strong> <code><?php echo htmlspecialchars($config['mcp']['version'] ?? '2.0.0'); ?></code></p>
+			<p><strong>Uživatel pro kontext:</strong> <code><?php echo htmlspecialchars($config['mcp']['user'] ?? '---'); ?></code></p>
 		</div>
 	</div>
 
@@ -132,9 +144,9 @@ try {
 									<h3 style="color: #b7791f;">Šablona pro: <?php echo htmlspecialchars($implStatus['target']); ?></h3>
 									<pre class='code-template'><code><?php 
 										if ($tool['is_generic']) {
-											echo htmlspecialchars("CREATE PROCEDURE " . $implStatus['target'] . "\nAS\nBEGIN\n\tSELECT 'Not implemented';\nEND");
+											echo htmlspecialchars("CREATE PROCEDURE " . $implStatus['target'] . "\nAS\nBEGIN\n\tSELECT 'Not implemented' AS Status;\nEND");
 										} else {
-											echo htmlspecialchars("<?php\nclass " . str_replace('.php', '', $implStatus['target']) . " extends McpTool {\n\tpublic function execute(array \$params): array {\n\t\treturn \$this->success();\n\t}\n}");
+											echo htmlspecialchars("<?php\nclass " . str_replace('.php', '', $implStatus['target']) . " extends McpTool {\n\tpublic function execute(array \$params): array {\n\t\treturn \$this->success(\"Nástroj zatím není implementován.\");\n\t}\n}");
 										}
 									?></code></pre>
 								<?php endif; ?>
@@ -157,10 +169,10 @@ try {
 		async function runTest(name) {
 			const resDiv = document.getElementById('response_' + name);
 			const formData = new FormData(document.getElementById('form_' + name));
-			resDiv.innerHTML = "⏳ Volám test_exec.php...";
+			resDiv.innerHTML = "⏳ Volám test_exec.php skrze index.php...";
 			try {
-				// test_exec.php si sám vytáhne testovací údaje z config.php
-				const response = await fetch('test_exec.php', { method: 'POST', body: formData });
+				// Voláme test_exec přes router, abychom zachovali kontext a hlavičky
+				const response = await fetch('index.php?mode=test', { method: 'POST', body: formData });
 				resDiv.innerHTML = await response.text();
 			} catch (e) {
 				resDiv.innerHTML = '<div class="error">Chyba: ' + e.message + '</div>';
