@@ -2,28 +2,38 @@
 declare(strict_types=1);
 
 /**
- * info.php - Diagnostický dashboard projektu RamsesMcp.
- * Verze 2.3 - Přidáno ověření identity (set_login) a oprava asynchronních volání.
- * * KONTEXT: Tento soubor je inkludován z index.php. Používá globální $config.
+ * RamsesMcp - info.php (Diagnostický Dashboard)
+ * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
+ * Toto je vizuální diagnostické rozhraní (UI) pro vývojáře. Není součástí
+ * standardní JSON-RPC komunikace s AI modely. Vykresluje HTML, nikoliv JSON.
+ * * * PŘEDPOKLADY BĚHU:
+ * Soubor je volán výhradně skrze index.php (v režimu ?mode=info), který
+ * mu připraví globální proměnnou $config a propláchne výstupní buffer.
+ * * * HLAVNÍ CÍLE TOHOTO SOUBORU:
+ * 1. Ověřit nízkoúrovňové připojení k databázi (sqlsrv).
+ * 2. Ověřit aplikační přihlášení (set_login) pro uživatele definovaného v configu.
+ * 3. Vylistovat dostupné MCP nástroje z DB a nabídnout formuláře pro jejich otestování.
  */
 
 header('Content-Type: text/html; charset=utf-8');
 
-// Použijeme globální konfiguraci z index.php
+/** @global array $config Globální konfigurace připravená v index.php */
 global $config;
 
 require_once __DIR__ . '/db_interface.php';
 require_once __DIR__ . '/db_connect.php'; 
 
 try {
+	// Ochrana proti přímému spuštění mimo router
 	if (!isset($config)) {
 		throw new Exception("Kritická chyba: Globální konfigurace \$config nebyla nalezena. info.php musí být voláno přes index.php.");
 	}
 
 	$dbi = new db_interface();
 
-	// NASTAVENÍ KONTEXTU: Ověříme, zda funguje login uživatele definovaného v konfiguraci
-	// (Využívá klíče 'user' a 'password' dle config-template.php)
+	// DESIGN DECISION (Test autentizace):
+	// Úmyslně zde izolovaně testujeme metodu authenticate().
+	// Využíváme klíče z konfigurace, které už mohly být přepsány hlavičkami z prohlížeče.
 	$user = $config['mcp']['user'] ?? '';
 	$pass = $config['mcp']['password'] ?? '';
 	$ip   = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -32,9 +42,10 @@ try {
 		throw new Exception("V konfiguraci chybí údaje pro MCP autentizaci (user/password).");
 	}
 
-	// Pokud set_login selže, vyhodí authenticate() výjimku, která se zachytí v catch bloku
+	// Pokud set_login selže, vyhodí authenticate() výjimku s popisem chyby z db_connect.php
 	$dbi->authenticate($user, $pass, $ip);
 
+	// Načtení dat pro vygenerování tabulky nástrojů
 	$data     = $dbi->getToolsForInfo();
 	$tools    = $data['tools'];
 	$params   = $data['params'];
@@ -152,7 +163,7 @@ try {
 									<h3 style="color: #b7791f;">Šablona pro: <?php echo htmlspecialchars($implStatus['target']); ?></h3>
 									<pre class='code-template'><code><?php 
 										if ($tool['is_generic']) {
-											echo htmlspecialchars("CREATE PROCEDURE " . $implStatus['target'] . "\nAS\nBEGIN\n\tSELECT 'Not implemented' AS Status;\nEND");
+											echo htmlspecialchars("CREATE PROCEDURE " . $implStatus['target'] . "\nAS\nBEGIN\n\tSET NOCOUNT ON;\n\tSELECT 'Not implemented' AS Status;\nEND");
 										} else {
 											echo htmlspecialchars("<?php\nclass " . str_replace('.php', '', $implStatus['target']) . " extends McpTool {\n\tpublic function execute(array \$params): array {\n\t\treturn \$this->success(\"Nástroj zatím není implementován.\");\n\t}\n}");
 										}
@@ -179,11 +190,14 @@ try {
 			const formData = new FormData(document.getElementById('form_' + name));
 			resDiv.innerHTML = "⏳ Volám test_exec.php přes index.php...";
 			try {
-				// DŮLEŽITÉ: Voláme index.php, aby se uplatnil router a globální konfigurace
+				// DESIGN DECISION (Kritické pro integritu):
+				// Záměrně voláme index.php?mode=test, nikoliv přímo test_exec.php!
+				// Tím zajistíme, že požadavek projde přes router, který správně načte
+				// případné konfigurační hlavičky (X-Mcp-*) a nastaví správnou DB a login.
 				const response = await fetch('index.php?mode=test', { method: 'POST', body: formData });
 				resDiv.innerHTML = await response.text();
 			} catch (e) {
-				resDiv.innerHTML = '<div class="error">Chyba: ' + e.message + '</div>';
+				resDiv.innerHTML = '<div class="error">Chyba AJAX požadavku: ' + e.message + '</div>';
 			}
 		}
 	</script>
