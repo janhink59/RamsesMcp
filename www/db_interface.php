@@ -4,107 +4,59 @@ declare(strict_types=1);
 /**
  * RamsesMcp - db_interface
  * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
- * Tato třída slouží jako "Orchestrátor" mezi MCP protokolem (JSON-RPC) a MSSQL databází.
- * 1. ŽIVOTNÍ CYKLUS: Objekt je vytvářen v main.php, info.php nebo test_exec.php, které vždy 
- * procházejí přes index.php (Router).
- * 2. KONFIGURACE: Striktně využívá globální proměnnou $config. Jakékoli re-importy config.php 
- * jsou zakázány, aby nedošlo k regresi dynamických změn z HTTP hlaviček (X-Mcp-*).
- * 3. KONEKTIVITA: Implementuje Singleton pattern nad globálním $GLOBALS['dbconnection'], 
- * čímž zajišťuje, že v rámci jednoho PHP requestu existuje právě jedno SPID v MSSQL.
- * 4. LOGIKA NÁSTROJŮ: Rozhoduje o směrování exekuce (Generic SQL Procedure vs. Custom PHP Class).
+ * Tato třída slouží jako "Orchestrátor" mezi MCP protokolem a MSSQL databází.
+ * Logiku připojení a autentizace deleguje na db_connect.php.
  */
+
+require_once __DIR__ . '/db_connect.php';
 
 class db_interface {
 	
-	/** @var resource $db Drží aktivní spojení na MSSQL přes sqlsrv_connect. */
+	/** @var resource $db Drží aktivní spojení na MSSQL. */
 	private $db;
 	
 	/** @var array $mcp_tool_list Seznam nástrojů načtený z databáze (metadata). */
 	private array $mcp_tool_list = [];
 	
-	/** @var array $mcp_tool_params Definice parametrů (typ, povinnost) pro jednotlivé nástroje. */
+	/** @var array $mcp_tool_params Definice parametrů pro jednotlivé nástroje. */
 	private array $mcp_tool_params = [];
 	
-	/** @var array $mcp_tool_data Buffer pro výsledná data z posledního spuštěného nástroje. */
+	/** @var array $mcp_tool_data Buffer pro výsledná data. */
 	private array $mcp_tool_data = [];
 	
-	/** @var string|null $last_error Poslední zachycená chyba (vhodné pro diagnostiku v UI). */
+	/** @var string|null $last_error Poslední zachycená chyba. */
 	private ?string $last_error = null;
 
-	/** @var bool $isAuthenticated Příznak, zda pro toto spojení proběhlo úspěšné set_login. */
+	/** @var bool $isAuthenticated Příznak úspěšného set_login. */
 	private bool $isAuthenticated = false;
 
 	/**
 	 * Konstruktor třídy.
-	 * Inicializuje DB spojení na základě globálního stavu a přednačítá definice nástrojů.
+	 * Využívá centralizovanou funkci getMssqlConnection().
 	 */
 	public function __construct() {
-		global $config; // Jediný přípustný zdroj pravdy o nastavení serveru a DB
+		// Centralizované získání spojení (Singleton)
+		$this->db = getMssqlConnection();
 
-		// 1. Validace kontextu
-		if (!isset($config['db'])) {
-			throw new Exception("db_interface: Globální konfigurace \$config['db'] není definována. Skript musí běžet přes index.php.");
-		}
-
-		// 2. Singleton pro DB spojení
-		// Je kritické sdílet stejné spojení, protože MSSQL session (a identita uživatele) je vázána na SPID.
-		if (isset($GLOBALS['dbconnection']) && $GLOBALS['dbconnection'] !== false) {
-			$this->db = $GLOBALS['dbconnection'];
-		} else {
-			// Připojení využívá parametry, které mohly být v index.php přepsány z hlaviček
-			$this->db = sqlsrv_connect($config['db']['server'], $config['db']['options']);
-
-			if ($this->db === false) {
-				$errors = sqlsrv_errors();
-				throw new Exception("Database connection failed: " . json_encode($errors, JSON_UNESCAPED_UNICODE));
-			}
-			
-			$GLOBALS['dbconnection'] = $this->db;
-			$GLOBALS['dbms'] = 'sqlsrv';
-		}
-
-		// 3. Registrace dostupných nástrojů
-		// Provádí se hned při startu, abychom znali schopnosti serveru (capabilities).
+		// Registrace dostupných nástrojů
 		$this->loadToolsFromDatabase();
 	}
 
 	/**
-	 * Autentizuje MCP spojení zavoláním procedury set_login.
-	 * Bez tohoto kroku nesmí executeTool povolit žádnou operaci.
-	 * * @param string $user     Login uživatele
-	 * @param string $password Heslo v prostém textu (v DB se porovnává MD5 hash)
-	 * @param string $ip       IP adresa klienta
+	 * Autentizuje MCP spojení delegováním na centralizovanou funkci v db_connect.php.
 	 */
 	public function authenticate(string $user, string $password, string $ip = '127.0.0.1'): void {
-		$sessionID = 'mcp_' . uniqid();
-		$pwdMd5    = md5($password);
-		
-		$sql    = "EXEC set_login @wwwsession = ?, @login = ?, @pwd = ?, @client_ip = ?, @application = ?";
-		$params = [
-			$sessionID,
-			$user,
-			$pwdMd5,
-			$ip,
-			'Ramses MCP Server'
-		];
-
-		$stmt = sqlsrv_query($this->db, $sql, $params);
-
-		if ($stmt === false) {
-			throw new Exception("Kritická chyba volání procedury set_login:\n" . print_r(sqlsrv_errors(), true));
+		try {
+			authenticateMcp($user, $password, $ip);
+			$this->isAuthenticated = true;
+		} catch (Throwable $e) {
+			$this->isAuthenticated = false;
+			throw $e; // Probublání hlášení (např. do info.php)
 		}
-
-		$authResult = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
-		
-		if ($authResult && isset($authResult['code']) && (int)$authResult['code'] < 0) {
-			throw new Exception("Autentizace selhala: " . ($authResult['msg'] ?? 'Neznámá chyba'));
-		}
-
-		$this->isAuthenticated = true;
 	}
 
 	/**
-	 * Načte strukturu nástrojů a jejich parametrů z tabulek mcp_tool a mcp_tool_param.
+	 * Načte strukturu nástrojů a jejich parametrů z databáze.
 	 */
 	private function loadToolsFromDatabase(): void {
 		$sql = "SELECT t.mcp_tool, t.name, t.title AS tool_title, t.description AS tool_desc, t.is_generic,
@@ -149,7 +101,7 @@ class db_interface {
 	}
 
 	/**
-	 * Vrací syrová data o nástrojích pro diagnostický dashboard info.php.
+	 * Vrací syrová data o nástrojích pro diagnostický dashboard.
 	 */
 	public function getToolsForInfo(): array {
 		return [
@@ -159,8 +111,7 @@ class db_interface {
 	}
 
 	/**
-	 * Generuje JSON Schema pro metodu tools/list v MCP protokolu.
-	 * Překládá DB typy na JSON typy (např. bigint -> number).
+	 * Generuje JSON Schema pro metodu tools/list.
 	 */
 	public function getToolsForMain(): array {
 		$schemaList = [];
@@ -192,7 +143,6 @@ class db_interface {
 				}
 			}
 
-			// Pro Ollama/Page Assist: Pokud nástroj nemá parametry, properties musí být {} (stdClass), nikoliv []
 			if (empty($schema['inputSchema']['properties'])) {
 				$schema['inputSchema']['properties'] = new stdClass();
 			}
@@ -205,7 +155,6 @@ class db_interface {
 
 	/**
 	 * Diagnostická metoda pro ověření existence implementace nástroje.
-	 * Kontroluje buď existenci SQL procedury (mcp_tool_...) nebo PHP souboru v /tools/.
 	 */
 	public function getImplementationStatus(string $tool_name): array {
 		if (!isset($this->mcp_tool_list[$tool_name])) {
@@ -230,14 +179,11 @@ class db_interface {
 
 	/**
 	 * HLAVNÍ EXEKUČNÍ BOD: Spouští logiku nástroje.
-	 * Provádí validaci parametrů (povinnost, UUID formát) a následně volá 
-	 * příslušnou implementaci.
 	 */
 	public function executeTool(string $tool_name, ?array $params = null): bool {
 		$this->mcp_tool_data = [];
 		$this->last_error    = null;
 
-		// 1. Bezpečnostní pojistka - bez autentizace (set_login) se dál nepustíme
 		if (!$this->isAuthenticated) {
 			$this->last_error = "Pro spuštění nástroje je vyžadována předchozí autentizace uživatele.";
 			return false;
@@ -251,7 +197,6 @@ class db_interface {
 		$toolDefs = $this->mcp_tool_params[$tool_name] ?? [];
 		$toolMeta = $this->mcp_tool_list[$tool_name];
 		
-		// 2. Striktní validace vstupů před odesláním do DB/třídy
 		foreach ($toolDefs as $def) {
 			$pName = $def['param_name'];
 			$val   = $params[$pName] ?? null;
@@ -269,14 +214,11 @@ class db_interface {
 			}
 		}
 
-		// 3. Směrování exekuce
 		if ($toolMeta['is_generic']) {
-			// SQL IMPLEMENTACE: Volání procedury mcp_tool_{name}
 			$procName  = "mcp_tool_" . preg_replace('/[^a-zA-Z0-9_]/', '', $tool_name);
 			$sqlParams = [];
 			$sqlArgs   = [];
 
-			// Sestavení parametrů pouze pokud jsou nějaké definovány
 			if (!empty($toolDefs)) {
 				foreach ($toolDefs as $def) {
 					$pName = $def['param_name'];
@@ -296,7 +238,6 @@ class db_interface {
 				}
 			}
 
-			// Finální SQL: Pokud nejsou parametry, výsledkem je "EXEC mcp_tool_nazev" bez mezer a čárek
 			$sql = "EXEC " . $procName . (!empty($sqlParams) ? " " . implode(', ', $sqlParams) : "");
 			$stmt = sqlsrv_query($this->db, $sql, $sqlArgs);
 
@@ -305,18 +246,30 @@ class db_interface {
 				return false;
 			}
 
-			while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-				foreach ($row as $key => $value) {
-					if ($value instanceof DateTime) {
-						$row[$key] = $value->format('Y-m-d H:i:s');
-					}
+			// Robustní zpracování výsledků (přeskočení count messages)
+			while (!sqlsrv_has_rows($stmt)) {
+				$next = sqlsrv_next_result($stmt);
+				if ($next === false) {
+					$this->last_error = "Chyba při posunu na další výsledek u {$procName}:\n" . print_r(sqlsrv_errors(), true);
+					return false;
+				} elseif ($next === null) {
+					break;
 				}
-				$this->mcp_tool_data[] = $row;
+			}
+
+			if (sqlsrv_has_rows($stmt)) {
+				while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+					foreach ($row as $key => $value) {
+						if ($value instanceof DateTime) {
+							$row[$key] = $value->format('Y-m-d H:i:s');
+						}
+					}
+					$this->mcp_tool_data[] = $row;
+				}
 			}
 			return true;
 
 		} else {
-			// PHP IMPLEMENTACE: Volání třídy Get_{name}
 			$pureName  = preg_replace('/[^a-zA-Z0-9_]/', '', $tool_name);
 			$className = "Get_" . $pureName;
 			$classFile = __DIR__ . "/tools/" . $className . ".php";
@@ -334,7 +287,6 @@ class db_interface {
 				return false;
 			}
 
-			/** @var McpTool $instance */
 			$instance = new $className($this->db);
 			$result = $instance->execute($params ?? []);
 
@@ -343,7 +295,6 @@ class db_interface {
 				return false;
 			}
 
-			// Parsování TSV výstupu z custom třídy zpět do pole pro unifikované zobrazení
 			$tsvString = $result['content'][0]['text'] ?? '';
 			$lines = explode("\n", trim($tsvString));
 			
@@ -367,7 +318,7 @@ class db_interface {
 	}
 
 	/**
-	 * Formátuje buffer $mcp_tool_data jako HTML tabulku pro info.php.
+	 * Formátuje buffer mcp_tool_data jako HTML tabulku.
 	 */
 	public function getResponseAsHtml(): string {
 		if ($this->last_error !== null) {
@@ -396,8 +347,7 @@ class db_interface {
 	}
 
 	/**
-	 * Formátuje buffer $mcp_tool_data do TSV pro MCP AI klienta.
-	 * TSV je zvoleno pro maximální úsporu tokenů v kontextovém okně LLM.
+	 * Formátuje buffer mcp_tool_data do TSV pro MCP AI klienta.
 	 */
 	public function getResponseAsMcpJson(): array {
 		if ($this->last_error !== null) {
@@ -429,7 +379,6 @@ class db_interface {
 
 	/**
 	 * Loguje aktivitu do tabulky mcp_log.
-	 * Voláno z main.php po dokončení každého requestu.
 	 */
 	public function logRequest(?string $requestId, string $method, string $payloadIn, string $payloadOut, int $durationMs, bool $isError): void {
 		$sql = "INSERT INTO mcp_log (request_id, method, payload_in, payload_out, duration_ms, error_flag) 
