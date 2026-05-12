@@ -81,7 +81,6 @@ where spid=@@spid
 GO
 create procedure mcp_tool_set_organization @organization_guid uuid
 as
-set nocount on
 declare @uid bigint
 select @uid=o.organization from organization o where o.organization_uuid=@organization_guid
 execute wwwr_setorganization @uid, 1

@@ -2,64 +2,74 @@
 declare(strict_types=1);
 
 /**
- * RamsesMcp - Hlavní vstupní bod (Front Controller / Router)
- * * Směruje požadavky na základě parametru ?mode= v URL.
- * Podporované režimy:
- * - mode=main : (Výchozí) Jádro pro zpracování standardních JSON-RPC MCP požadavků (Ollama).
- * - mode=info : Vrací interaktivní HTML dashboard s přehledem nástrojů pro zobrazení v běžném prohlížeči
- * - mode=test : Endpoint pro asynchronní spouštění testů z dashboardu "info".
- * * Globální kontext ($config):
- * Očekává se struktura z config.php, případně přepsaná HTTP hlavičkami (X-Mcp-*):
- * - ['db']['server']              (string) IP nebo název MSSQL serveru
- * - ['db']['options']['Database'] (string) Název cílové databáze
- * - ['mcp']['user']               (string) Přihlašovací jméno z hlavičky/konfigu
- * - ['mcp']['password']           (string) Heslo z hlavičky/konfigu
+ * RamsesMcp - index.php (Front Controller & Router)
+ * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
+ * Toto je jediný vstupní bod (Entry Point) celé aplikace. Všechny požadavky
+ * (z prohlížeče i od AI klienta) musí procházet přes tento soubor.
+ * * * HLAVNÍ ÚKOLY:
+ * 1. ROUTING: Směřuje požadavky na základě parametru `?mode=` v URL.
+ * 2. CONFIG ORCHESTRATION: Načítá statický soubor config.php a dynamicky jej 
+ * přebíjí hodnotami z HTTP hlaviček (X-Mcp-*). To umožňuje bezpečné 
+ * přepínání databází/uživatelů přímo z klienta (např. Page Assist).
+ * 3. OUTPUT CONTROL: Zajišťuje integritu výstupu. Pro AI (režim 'main') je 
+ * kritické, aby výstup neobsahoval žádné PHP varování nebo náhodné mezery, 
+ * které by rozbily JSON formát.
+ * * * PODPOROVANÉ REŽIMY (?mode=):
+ * - mode=main : (Výchozí) Jádro pro JSON-RPC komunikaci s AI modely (Ollama, Claude).
+ * - mode=info : Interaktivní HTML dashboard pro diagnostiku (prohlížeč).
+ * - mode=test : AJAX endpoint pro spouštění testů z dashboardu.
  */
 
-// 1. Start bufferingu - zachytí mezery, BOM nebo chyby z configu
+// 1. ZÁCHRANNÝ BUFFERING: Zachytí jakýkoliv nechtěný výstup (BOM, mezery, chyby v configu),
+// aby bylo možné jej v režimu 'main' vyčistit před odesláním JSON odpovědi.
 ob_start();
 
-// Zjištění požadovaného režimu z URL. Pokud chybí, defaultuje na 'main'.
+// Zjištění režimu. Pokud parametr chybí, automaticky předpokládáme AI klienta.
 $mode = $_GET['mode'] ?? 'main';
 
-// Nastavení error reportingu pro režim main - chceme čistý JSON, ne HTML chyby
+// Pro AI režim vypínáme zobrazování chyb v HTML formátu, chceme čisté logy.
 if ($mode === 'main') {
 	ini_set('display_errors', '0');
 	error_reporting(E_ALL);
 }
 
-// 2. Načtení základní konfigurace do normální globální proměnné
-// Očekává se, že config.php vrací pole (stejná struktura jako config-template.php)
+// 2. NAČTENÍ KONFIGURACE: Jediné přípustné místo pro require 'config.php'.
+// Výsledek je uložen do globální proměnné, kterou využívají db_connect a db_interface.
 $config = require_once __DIR__ . '/config.php';
 
-// 3. Přepis konfigurace pomocí HTTP hlaviček z Page Assist (pokud jsou dostupné)
-// V PHP se vlastní hlavičky X-Mcp-* mapují do pole $_SERVER s prefixem HTTP_X_MCP_*
+/**
+ * DYNAMICKÝ PŘEPIS KONFIGURACE (Context Injection):
+ * Klient (např. prohlížečové rozšíření Page Assist) může poslat vlastní parametry spojení.
+ * Mapujeme standardní HTTP hlavičky (X-Mcp-*) do vnitřního pole $config.
+ */
 if (isset($_SERVER['HTTP_X_MCP_DBSERVER']) && trim($_SERVER['HTTP_X_MCP_DBSERVER']) !== '') {
-	$config['db']['server']              = trim($_SERVER['HTTP_X_MCP_DBSERVER']);  // Přepis nastavení MSSQL serveru
+	$config['db']['server'] = trim($_SERVER['HTTP_X_MCP_DBSERVER']);
 }
 
 if (isset($_SERVER['HTTP_X_MCP_DATABASE']) && trim($_SERVER['HTTP_X_MCP_DATABASE']) !== '') {
-	$config['db']['options']['Database'] = trim($_SERVER['HTTP_X_MCP_DATABASE']);  // Přepis nastavení cílové databáze
+	$config['db']['options']['Database'] = trim($_SERVER['HTTP_X_MCP_DATABASE']);
 }
 
 if (isset($_SERVER['HTTP_X_MCP_USER']) && trim($_SERVER['HTTP_X_MCP_USER']) !== '') {
-	$config['mcp']['user']               = trim($_SERVER['HTTP_X_MCP_USER']);      // Přepis MCP uživatele (pro info/test)
+	$config['mcp']['user'] = trim($_SERVER['HTTP_X_MCP_USER']);
 }
 
 if (isset($_SERVER['HTTP_X_MCP_PASS']) && trim($_SERVER['HTTP_X_MCP_PASS']) !== '') {
-	$config['mcp']['password']           = trim($_SERVER['HTTP_X_MCP_PASS']);      // Přepis MCP hesla
+	$config['mcp']['password'] = trim($_SERVER['HTTP_X_MCP_PASS']);
 }
 
-// Nastavení základních cest pro případné sdílené knihovny
+// Nastavení include path pro případné externí knihovny v nadřazených složkách
 $virtualDir = dirname($_SERVER['SCRIPT_FILENAME']);
 $parentDir  = dirname($virtualDir); 
-
 set_include_path(get_include_path() . PATH_SEPARATOR . $parentDir);
 
-// 4. Delegování na příslušný obslužný skript
+/**
+ * 3. DELEGOVÁNÍ (ROUTING):
+ * Na základě zvoleného režimu inkludujeme příslušný logický soubor.
+ */
 switch ($mode) {
 	case 'info':
-		// Spláchnutí bufferu do výstupu (pro HTML dashboard je případný text neškodný)
+		// V HTML režimu (Dashboard) případný balast z bufferu nevadí.
 		ob_end_flush();
 		require_once __DIR__ . '/info.php';
 		break;
@@ -71,7 +81,12 @@ switch ($mode) {
 
 	case 'main':
 	default:
-		// Kritický krok: Před přechodem do main.php smažeme veškerý textový balast z bufferu!
+		/**
+		 * DESIGN DECISION (Integrita JSON-RPC):
+		 * Před spuštěním main.php (AI komunikace) totálně vyčistíme výstupní buffer.
+		 * Tím odstraníme jakékoliv mezery nebo PHP notice, které se mohly vygenerovat
+		 * během načítání konfigurace. AI klient dostane 100% čistý JSON.
+		 */
 		ob_clean();
 		require_once __DIR__ . '/main.php';
 		break;
