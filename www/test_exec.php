@@ -2,8 +2,18 @@
 declare(strict_types=1);
 
 /**
- * test_exec.php - Endpoint pro asynchronní testy z info.php.
- * Verze 2.5 - Oprava zalamování dlouhých JSON řetězců (pre-wrap).
+ * RamsesMcp - test_exec.php (AJAX Test Executor)
+ * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
+ * Tento soubor slouží jako asynchronní (AJAX) brána pro spouštění testů 
+ * přímo z dashboardu info.php. 
+ * * * KRITICKÁ ZÁVISLOST (ROUTING):
+ * Tento skript je navržen tak, aby byl inkludován z index.php v režimu '?mode=test'.
+ * Pokud by byl volán přímo (test_exec.php), selže, protože nebude mít přístup 
+ * k naplněné globální proměnné $config ani k nastaveným include cestám.
+ * * * IDENTITY FLOW:
+ * Skript přebírá identitu (uživatele/heslo/server) z globálního $config, 
+ * což znamená, že testy běží přesně pod tím kontextem, který je aktuálně 
+ * nastaven v prohlížeči (včetně případných X-Mcp-* hlaviček).
  */
 
 require_once __DIR__ . '/db_interface.php';
