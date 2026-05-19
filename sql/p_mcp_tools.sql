@@ -86,10 +86,11 @@ select @uid=o.organization from organization o where o.organization_uuid=@organi
 execute wwwr_setorganization @uid, 1
 execute mcp_tool_get_user_context
 --select 'A' msg
+
 GO
 -- test funkce
-begin tran
-execute debuglogin 'hink'
-execute mcp_tool_organization_for_user 'hink'
-rollback
+--begin tran
+--execute debuglogin 'hink'
+--execute mcp_tool_organization_for_user 'hink'
+--rollback
 GO

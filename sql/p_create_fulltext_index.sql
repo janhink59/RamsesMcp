@@ -52,6 +52,7 @@ BEGIN
 	SET @Sql = N'CREATE FULLTEXT INDEX ON ' + @tabname + N' (' + @syntax + N') ' +
 	           N'KEY INDEX ' + @key + N';';
 
+	PRINT @sql;
 	EXEC sp_executesql @Sql;
 	PRINT 'Fulltextový index na tabulce ' + @tabname + ' byl úspìšnì vytvoøen.';
 END;

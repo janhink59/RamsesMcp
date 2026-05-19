@@ -1,8 +1,10 @@
-drop table if exists mcp_tool_param
-drop table if exists mcp_tool
-drop table if exists mcp_log
+--drop table if exists mcp_tool_param
+--drop table if exists mcp_tool
+--drop table if exists mcp_log
+--drop table if exists mcp_scenario
 
 -- Tabulka nástrojù
+if object_id('mcp_tool') is null
 CREATE TABLE mcp_tool (
     mcp_tool UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     name VARCHAR(100) NOT NULL UNIQUE,
@@ -12,6 +14,7 @@ CREATE TABLE mcp_tool (
 );
 
 -- Tabulka parametrù
+if object_id('mcp_tool_param') is null
 CREATE TABLE mcp_tool_param (
     mcp_tool UNIQUEIDENTIFIER NOT NULL references mcp_tool on delete cascade,
     param_name VARCHAR(100) NOT NULL,
@@ -22,6 +25,7 @@ CREATE TABLE mcp_tool_param (
 );
 
 -- Tabulka pro logování MCP requestù a odpovìdí
+if object_id('mcp_log') is null
 CREATE TABLE mcp_log (
 	log_id BIGINT IDENTITY(1,1) PRIMARY KEY,
 	created_at DATETIME2 DEFAULT SYSDATETIME(),
@@ -31,4 +35,15 @@ CREATE TABLE mcp_log (
 	payload_out NVARCHAR(MAX),
 	duration_ms INT,
 	error_flag BIT DEFAULT 0
+);
+
+if object_id('mcp_scenario') is null
+CREATE TABLE mcp_scenario (
+    scenario_code VARCHAR(50) constraint pk_scenario_code PRIMARY KEY,
+    title NVARCHAR(200) NOT NULL,
+    intent NVARCHAR(500) NOT NULL,
+    keywords NVARCHAR(500) NOT NULL,
+    when_to_use NVARCHAR(500) NULL,
+    when_not_to_use NVARCHAR(500) NULL,
+    instructions NVARCHAR(MAX) NOT NULL
 );
