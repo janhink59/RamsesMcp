@@ -11,6 +11,7 @@ execute debuglogin 'mcp_server'
 
 delete from mcp_tool_param
 delete from mcp_tool
+delete from mcp_scenario
 
 --select hashbytes('MD5',N'mcp_tool.'+i.name)
 --	,i.*
@@ -32,6 +33,8 @@ select hashbytes('MD5',N'mcp_tool.'+p.name)
 	,p.is_required
 from XLSX_mcp_tool_param$ p
 	join mcp_tool t on t.mcp_tool=hashbytes('MD5',N'mcp_tool.'+p.name)
+
+
 GO
 --begin tran
 

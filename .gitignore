@@ -1,2 +1,3 @@
 www/config.php
 --*
+sql/fillup_mcp_tools.sql

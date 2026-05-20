@@ -10,5 +10,9 @@ create_fulltext_indexes.sql
 
 # Nástroje
 mcp_tool_find_system_workflow.sql
-p_mcp_tools.sql
 mcp_tool_read_system_workflow.sql
+mcp_tool_get_user_context.sql
+p_mcp_tools.sql
+
+
+fillup_mcp_tools.sql
