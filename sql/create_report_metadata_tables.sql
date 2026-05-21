@@ -15,9 +15,8 @@
 -- Tabulka definic samotných reportù
 IF OBJECT_ID('mcp_report') IS NULL
 CREATE TABLE mcp_report (
-	report_code VARCHAR(50) CONSTRAINT pk_mcp_report PRIMARY KEY,
+	report_name VARCHAR(50) CONSTRAINT pk_mcp_report PRIMARY KEY,
 	title NVARCHAR(200) NOT NULL,
-	procedure_name VARCHAR(100) NOT NULL,
 	description NVARCHAR(MAX) NULL
 );
 

@@ -12,15 +12,17 @@ class McpRegistry {
 
 	/**
 	 * Konstruktor přijímá databázové spojení.
-	 * * @param resource $db
+	 *
+	 * @param resource $db
 	 */
 	public function __construct($db) {
 		$this->db = $db;
 	}
 
 	/**
-	 * Načte všechny povolené nástroje a zanořené definice jejich parametrů.
-	 * * @return array Strukturované pole připravené k serializaci do JSONu pro tools/list.
+	 * Načte všechny povolené nástroje a zanořené definice jejich parametrů z DB.
+	 *
+	 * @return array Strukturované pole připravené k serializaci do JSONu pro tools/list.
 	 */
 	public function getTools(): array {
 		// Sloupec is_generic je nezbytný pro UI Dashboard a správné směrování v index.php.
@@ -45,14 +47,13 @@ class McpRegistry {
 			// Pokud nástroj ještě není v poli definován, vytvoříme pro něj kořenový uzel.
 			if (!isset($tools[$tName])) {
 				// BEZPEČNÉ PŘETYPOVÁNÍ: Ošetření proti anomáliím nativního sqlsrv ovladače.
-				// MSSQL typ BIT může přijít jako int(1), int(0), string("1"), string("0") nebo jako prázdná hodnota.
 				$isGeneric = isset($row['is_generic']) && (int)$row['is_generic'] === 1;
 				
 				$tools[$tName] = [
 					"name"        => $tName,
 					"title"       => $row['tool_title'],
 					"description" => ($row['tool_title'] !== '' ? $row['tool_title'] . " - " : "") . $row['description'],
-					"is_generic"  => $isGeneric,                                    // Interní flag propisovaný pro test.php a index.php
+					"is_generic"  => $isGeneric,
 					"inputSchema" => [
 						"type"       => "object",
 						"properties" => [],

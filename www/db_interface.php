@@ -3,16 +3,19 @@ declare(strict_types=1);
 
 /**
  * RamsesMcp - db_interface
- * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
+ *
+ * ARCHITEKTONICKÝ KONTEXT (PRO AI):
  * Tato třída slouží jako "Orchestrátor" mezi MCP protokolem (JSON-RPC) a MSSQL databází.
  * Zajišťuje směrování (routing) volání nástrojů z klienta do správné
  * implementace (generická SQL procedura vs. dedikovaná PHP třída z adresáře /tools).
  *
- * * ZÁVISLOSTI NA DB SCHÉMATU (Očekávaná struktura):
+ * ZÁVISLOSTI NA DB SCHÉMATU (Očekávaná struktura):
  * - Tabulka `mcp_tool`: Metadata nástrojů (sloupce: mcp_tool, name, title, description, is_generic)
  * - Tabulka `mcp_tool_param`: Definice parametrů (sloupce: param_name, param_type, is_required)
  * - Tabulka `mcp_log`: Audit log (sloupce: request_id, method, payload_in, duration_ms, error_flag)
- * * * GLOBÁLNÍ ZÁVISLOSTI:
+ * - Tabulka `mcp_saved_values`: Dočasné tabulky s hodnotami pole (sloupce: wwwsession, save_as, row_index, saved_data)
+ *
+ * GLOBÁLNÍ ZÁVISLOSTI:
  * Striktně deleguje fyzické připojení k databázi a autentizační logiku 
  * na centralizované funkce v souboru `db_connect.php`.
  */
@@ -41,21 +44,17 @@ class db_interface {
 
 	/**
 	 * Konstruktor třídy.
-	 * Inicializuje singleton spojení a okamžitě registruje dostupné nástroje do paměti,
-	 * abychom mohli ihned odpovídat na dotazy klienta ohledně schopností serveru (capabilities).
+	 * Inicializuje singleton spojení a okamžitě registruje dostupné nástroje do vnitřní mapy.
 	 */
 	public function __construct() {
-		// Centralizované získání spojení (Singleton, uchovává SPID)
 		$this->db = getMssqlConnection();
-
-		// Registrace dostupných nástrojů
 		$this->loadToolsFromDatabase();
 	}
 
 	/**
 	 * Autentizuje spojení pro konkrétního uživatele MCP.
-	 * Bez úspěšného zavolání nesmí proběhnout exekuce žádného nástroje.
-	 * * @param string $user     Login koncového uživatele (např. Administrator)
+	 *
+	 * @param string $user     Login koncového uživatele (např. Administrator)
 	 * @param string $password Heslo uživatele v prostém textu
 	 * @param string $ip       Auditní IP adresa (default: 127.0.0.1)
 	 * @throws Exception       Propaguje výjimku nahoru, pokud selže SQL nebo login
@@ -66,12 +65,12 @@ class db_interface {
 			$this->isAuthenticated = true;
 		} catch (Throwable $e) {
 			$this->isAuthenticated = false;
-			throw $e; // Probublání hlášení (např. do info.php pro zobrazení "Chyba nastavení kontextu")
+			throw $e;
 		}
 	}
 
 	/**
-	 * Načte strukturu nástrojů a jejich parametrů z databáze a naplní interní registry.
+	 * Načte strukturu nástrojů a jejich parametrů z databáze do interní mapy pro rychlé ověřování.
 	 */
 	private function loadToolsFromDatabase(): void {
 		$sql = "SELECT t.mcp_tool, t.name, t.title AS tool_title, t.description AS tool_desc, t.is_generic,
@@ -117,6 +116,7 @@ class db_interface {
 
 	/**
 	 * Vrací syrová data o nástrojích pro diagnostický dashboard (info.php).
+	 *
 	 * @return array{tools: array, params: array}
 	 */
 	public function getToolsForInfo(): array {
@@ -128,52 +128,32 @@ class db_interface {
 
 	/**
 	 * Generuje strukturu JSON Schema pro MCP metodu tools/list.
-	 * Překládá DB typy (bigint, uuid) na JSON standard (number, string).
+	 * Využívá dedikovanou třídu McpRegistry.
+	 *
 	 * @return array<int, array> Indexované pole odpovídající specifikaci MCP protokolu.
 	 */
 	public function getToolsForMain(): array {
-		$schemaList = [];
-
-		foreach ($this->mcp_tool_list as $tName => $tool) {
-			$schema = [
-				"name"        => $tool['name'],
-				"title"       => $tool['title'],
-				"description" => ($tool['title'] !== '' ? $tool['title'] . " - " : "") . $tool['description'],
-				"inputSchema" => [
-					"type"       => "object",
-					"properties" => [],
-					"required"   => []
-				]
-			];
-
-			foreach ($this->mcp_tool_params[$tName] as $param) {
-				$pName = $param['param_name'];
-				$jsonType = ($param['param_type'] === 'number' || $param['param_type'] === 'bigint') ? 'number' : 'string';
-
-				$schema['inputSchema']['properties'][$pName] = [
-					"type"        => $jsonType,
-					"title"       => $param['param_title'],
-					"description" => $param['description'] . ($param['param_type'] === 'uuid' ? " (UUID)" : "")
-				];
-
-				if ($param['is_required']) {
-					$schema['inputSchema']['required'][] = $pName;
-				}
+		require_once __DIR__ . '/McpRegistry.php';
+		
+		$registry = new McpRegistry($this->db);
+		$tools = $registry->getTools();
+		
+		// Očištění schématu od našich interních příznaků a zajištění kompatibility
+		foreach ($tools as &$tool) {
+			unset($tool['is_generic']);
+			
+			// Pro Ollama/Page Assist: properties nesmí být prázdné pole [], ale prázdný objekt {}
+			if (empty($tool['inputSchema']['properties'])) {
+				$tool['inputSchema']['properties'] = new stdClass();
 			}
-
-			// Pro Ollama/Page Assist: Pokud nástroj nemá parametry, vlastnosti musí být prázdný objekt {}, nikoliv pole []
-			if (empty($schema['inputSchema']['properties'])) {
-				$schema['inputSchema']['properties'] = new stdClass();
-			}
-
-			$schemaList[] = $schema;
 		}
-
-		return array_values($schemaList);
+		
+		return $tools;
 	}
 
 	/**
 	 * Diagnostická metoda pro ověření existence fyzické implementace nástroje.
+	 *
 	 * @param string $tool_name
 	 * @return array{exists: bool, target: string}
 	 */
@@ -199,11 +179,10 @@ class db_interface {
 	}
 
 	/**
-	 * HLAVNÍ EXEKUČNÍ BOD: Spouští logiku konkrétního nástroje.
-	 * Řeší validaci parametrů, ošetření UUID a rozbočení mezi SQL a PHP třídou.
+	 * HLAVNÍ EXEKUČNÍ BOD: Orchestruje spuštění logiky konkrétního nástroje.
 	 * * @param string $tool_name Název nástroje
-	 * @param array<string, mixed>|null $params Asociativní pole vstupních parametrů od klienta
-	 * @return bool True při úspěchu, False při chybě (text chyby je v $this->last_error)
+	 * @param array<string, mixed>|null $params Asociativní pole vstupních parametrů
+	 * @return bool True při úspěchu, False při chybě
 	 */
 	public function executeTool(string $tool_name, ?array $params = null): bool {
 		$this->mcp_tool_data = [];
@@ -223,87 +202,29 @@ class db_interface {
 		$toolDefs = $this->mcp_tool_params[$tool_name] ?? [];
 		$toolMeta = $this->mcp_tool_list[$tool_name];
 		
-		// 2. Striktní validace vstupů před odesláním do DB/třídy
+		// 2. Příprava argumentů a odstranění save_as (nesmí zasáhnout logiku samotného nástroje)
+		$execParams = $params ?? [];
+		$execDefs   = [];
+		$saveAs     = $execParams['save_as'] ?? null;
+		
 		foreach ($toolDefs as $def) {
-			$pName = $def['param_name'];
-			$val   = $params[$pName] ?? null;
-
-			if ($def['is_required'] && ($val === null || $val === '')) {
-				$this->last_error = "Parametr '$pName' je povinný.";
-				return false;
-			}
-
-			if ($def['param_type'] === 'uuid' && !empty($val)) {
-				if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $val)) {
-					$this->last_error = "Parametr '$pName' musí být platné UUID.";
-					return false;
-				}
+			if ($def['param_name'] !== 'save_as') {
+				$execDefs[] = $def;
 			}
 		}
+		
+		if (isset($execParams['save_as'])) {
+			unset($execParams['save_as']);
+		}
 
-		// 3. Směrování exekuce podle příznaku is_generic
+		// 3. Rozhodovací logika pro instancování správného objektu (Routing)
+		require_once __DIR__ . '/McpTool.php';
+
 		if ($toolMeta['is_generic']) {
-			// SQL IMPLEMENTACE: Volání generické uložené procedury
-			$procName  = "mcp_tool_" . preg_replace('/[^a-zA-Z0-9_]/', '', $tool_name);
-			$sqlParams = [];
-			$sqlArgs   = [];
-
-			if (!empty($toolDefs)) {
-				foreach ($toolDefs as $def) {
-					$pName = $def['param_name'];
-					$val   = $params[$pName] ?? null;
-
-					if ($val === null || $val === '') {
-						$sqlParams[] = "@{$pName} = NULL";
-					} else {
-						if ($def['param_type'] === 'uuid') {
-							// Překlad UUID z textu na binární hex formát pro MSSQL
-							$hex = str_replace('-', '', $val);
-							$sqlParams[] = "@{$pName} = 0x{$hex}";
-						} else {
-							$sqlParams[] = "@{$pName} = ?";
-							$sqlArgs[]   = $val;
-						}
-					}
-				}
-			}
-
-			$sql = "EXEC " . $procName . (!empty($sqlParams) ? " " . implode(', ', $sqlParams) : "");
-			$stmt = sqlsrv_query($this->db, $sql, $sqlArgs);
-
-			if ($stmt === false) {
-				$this->last_error = "Chyba při provádění procedury {$procName}:\n" . print_r(sqlsrv_errors(), true);
-				return false;
-			}
-
-			// ARCHITEKTONICKÁ POJISTKA (NEODSTRAŇOVAT!):
-			// Pokud procedura v DB není zkompilována s 'SET NOCOUNT ON', MSSQL server pošle informační 
-			// zprávy typu "1 row affected" jako prázdné result sety. Tato smyčka je přeskakuje, 
-			// dokud nenarazí na reálná data ze závěrečného SELECTu procedury.
-			while (!sqlsrv_has_rows($stmt)) {
-				$next = sqlsrv_next_result($stmt);
-				if ($next === false) {
-					$this->last_error = "Chyba při posunu na další výsledek u {$procName}:\n" . print_r(sqlsrv_errors(), true);
-					return false;
-				} elseif ($next === null) {
-					break; // Konec výsledků, nenalezen žádný dataset
-				}
-			}
-
-			if (sqlsrv_has_rows($stmt)) {
-				while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-					foreach ($row as $key => $value) {
-						if ($value instanceof DateTime) {
-							$row[$key] = $value->format('Y-m-d H:i:s');
-						}
-					}
-					$this->mcp_tool_data[] = $row;
-				}
-			}
-			return true;
-
+			require_once __DIR__ . '/McpGenericStoredProc.php';
+			/** @var McpTool $instance */
+			$instance = new McpGenericStoredProc($this->db, $tool_name, $execDefs);
 		} else {
-			// PHP IMPLEMENTACE: Volání dedikované třídy (např. Get_client_detail.php)
 			$pureName  = preg_replace('/[^a-zA-Z0-9_]/', '', $tool_name);
 			$className = "Get_" . $pureName;
 			$classFile = __DIR__ . "/tools/" . $className . ".php";
@@ -313,9 +234,7 @@ class db_interface {
 				return false;
 			}
 
-			require_once __DIR__ . '/McpTool.php';
 			require_once $classFile;
-
 			if (!class_exists($className) || !is_subclass_of($className, 'McpTool')) {
 				$this->last_error = "Třída $className musí existovat a dědit z McpTool.";
 				return false;
@@ -323,39 +242,122 @@ class db_interface {
 
 			/** @var McpTool $instance */
 			$instance = new $className($this->db);
-			$result = $instance->execute($params ?? []);
+		}
 
-			if (isset($result['isError']) && $result['isError']) {
-				$this->last_error = $result['content'][0]['text'] ?? 'Neznámá chyba v custom nástroji.';
-				return false;
+		// 4. Unifikovaná validace a spuštění nezávisle na typu (SQL vs PHP)
+		$result = $instance->validateAndExecute($execParams, $execDefs);
+
+		if (isset($result['isError']) && $result['isError']) {
+			$this->last_error = $result['content'][0]['text'] ?? 'Neznámá chyba v nástroji.';
+			return false;
+		}
+
+		// 5. Zpětné parsování TSV výstupu do pole
+		$tsvString = $result['content'][0]['text'] ?? '';
+		$this->parseTsvToData($tsvString);
+
+		// 6. Orchestrace volitelného parametru save_as
+		return $this->processSaveAs($saveAs);
+	}
+
+	/**
+	 * Pomocná metoda pro parsování unifikovaného TSV výstupu zpět do strukturovaného pole.
+	 *
+	 * @param string $tsvString Surový TSV řetězec z McpTool objektu.
+	 */
+	private function parseTsvToData(string $tsvString): void {
+		$this->mcp_tool_data = [];
+		$lines = explode("\n", trim($tsvString));
+		
+		if (count($lines) > 0 && !str_contains($lines[0], "\t") && $lines[0] !== '') {
+			$firstLine = array_shift($lines);
+			// Pokud nástroj korektně hlásí prázdný dataset, vracíme prázdné pole
+			if (str_starts_with($firstLine, 'Žádná data')) {
+				return;
 			}
+		}
 
-			// Zpětné parsování TSV výstupu z custom třídy do pole, abychom 
-			// mohli data zobrazit i v HTML dashboardu info.php.
-			$tsvString = $result['content'][0]['text'] ?? '';
-			$lines = explode("\n", trim($tsvString));
-			
-			if (count($lines) > 0 && !str_contains($lines[0], "\t")) {
-				array_shift($lines); // Odstranění volitelného úvodního textu (např. "Nalezena data:")
-			}
-
-			if (count($lines) >= 2) {
-				$headers = explode("\t", array_shift($lines));
-				foreach ($lines as $line) {
-					$values = explode("\t", $line);
-					$row = [];
-					foreach ($headers as $index => $header) {
-						$row[$header] = $values[$index] ?? '';
-					}
-					$this->mcp_tool_data[] = $row;
+		if (count($lines) >= 2) {
+			$headers = explode("\t", array_shift($lines));
+			foreach ($lines as $line) {
+				if ($line === '') continue;
+				$values = explode("\t", $line);
+				$row = [];
+				foreach ($headers as $index => $header) {
+					$row[$header] = $values[$index] ?? '';
 				}
+				$this->mcp_tool_data[] = $row;
 			}
-			return true;
 		}
 	}
 
 	/**
+	 * Pomocná metoda pro zachycení a uložení stavu nástroje (Claim Check pattern).
+	 * Pokud je parametr platný, přepíše se buffer mcp_tool_data jednoduchým upozorněním.
+	 *
+	 * @param mixed $saveAs Hodnota parametru (string nebo null)
+	 * @return bool True při úspěchu
+	 */
+	private function processSaveAs($saveAs): bool {
+		if (!is_string($saveAs) || trim($saveAs) === '') {
+			return true;
+		}
+		
+		$saveAs = trim($saveAs);
+		
+		if (!preg_match('/^[a-z0-9_]+$/', $saveAs)) {
+			$this->last_error = "Parametr 'save_as' obsahuje nepovolené znaky. Jsou povolena pouze malá písmena bez diakritiky, číslice a podtržítko.";
+			return false;
+		}
+
+		$sessionId = $GLOBALS['mcp_session_id'] ?? null;
+		if (!$sessionId) {
+			$this->last_error = "Kritická chyba: Chybí kontext databázové relace (mcp_session_id) nutný pro uložení proměnné.";
+			return false;
+		}
+
+		$sqlDelete = "DELETE FROM mcp_saved_values WHERE wwwsession = ? AND save_as = ?";
+		$stmtDelete = sqlsrv_query($this->db, $sqlDelete, [$sessionId, $saveAs]);
+		if ($stmtDelete === false) {
+			$this->last_error = "Chyba při promazávání předchozích hodnot v tabulce mcp_saved_values:\n" . print_r(sqlsrv_errors(), true);
+			return false;
+		}
+
+		$rowIndex = 0;
+		$sqlInsert = "INSERT INTO mcp_saved_values (wwwsession, save_as, row_index, saved_data) VALUES (?, ?, ?, ?)";
+
+		if (!empty($this->mcp_tool_data)) {
+			foreach ($this->mcp_tool_data as $row) {
+				$val = reset($row);
+				$strVal = ($val === null) ? null : (string)$val;
+				
+				if ($strVal !== null && mb_strlen($strVal) > 200) {
+					$strVal = mb_substr($strVal, 0, 200);
+				}
+
+				$stmtInsert = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $saveAs, $rowIndex, $strVal]);
+				if ($stmtInsert === false) {
+					$this->last_error = "Chyba při ukládání hodnoty do mcp_saved_values na indexu {$rowIndex}:\n" . print_r(sqlsrv_errors(), true);
+					return false;
+				}
+				$rowIndex++;
+			}
+		}
+
+		// Přepis výsledku pro AI i HTML rozhraní
+		$this->mcp_tool_data = [
+			[
+				'rows' => $rowIndex,
+				'msg'  => "Data uložena jako '{$saveAs}'"
+			]
+		];
+
+		return true;
+	}
+
+	/**
 	 * Formátuje buffer mcp_tool_data jako HTML tabulku pro zobrazení v testovacím UI.
+	 *
 	 * @return string HTML reprezentace výsledku
 	 */
 	public function getResponseAsHtml(): string {
@@ -386,12 +388,8 @@ class db_interface {
 
 	/**
 	 * Formátuje buffer mcp_tool_data do TSV pro odeslání zpět MCP AI klientovi.
-	 * * DESIGN DECISION (Proč TSV místo JSON objektů?):
-	 * Odeslání odpovědi z databáze v TSV (Tab-Separated Values) je úmyslná volba 
-	 * architektury. Minimalizuje redundanci (odpadá opakování názvů klíčů pro každý řádek),
-	 * což přináší radikální úsporu cenných tokenů v kontextovém okně LLM. AI model 
-	 * umí TSV tabulky naprosto nativně a spolehlivě číst.
-	 * * @return array JSON-RPC Content pole s textovou zprávou
+	 *
+	 * @return array JSON-RPC Content pole s textovou zprávou
 	 */
 	public function getResponseAsMcpJson(): array {
 		if ($this->last_error !== null) {
@@ -410,8 +408,6 @@ class db_interface {
 		
 		foreach ($this->mcp_tool_data as $row) {
 			$rowStr = array_map(function($val) {
-				// Bezpečnostní sanitace: odstranění odřádkování a tabulátorů přímo z dat, 
-				// aby nedošlo k rozbití formátu TSV.
 				return str_replace(["\r", "\n", "\t"], " ", (string)$val);
 			}, $row);
 			
@@ -425,6 +421,7 @@ class db_interface {
 
 	/**
 	 * Loguje aktivitu do tabulky mcp_log pro účely auditu a debugování.
+	 *
 	 * @param string|null $requestId ID požadavku z JSON-RPC od klienta
 	 * @param string $method         Volaná metoda (např. tools/call)
 	 * @param string $payloadIn      Kompletní syrový JSON vstup

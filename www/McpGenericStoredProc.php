@@ -58,35 +58,49 @@ class McpGenericStoredProc extends McpTool {
 		}
 		
 		// Finální sestavení SQL dotazu pro vyvolání procedury
-		$sql = "EXEC " . $procName . " " . implode(', ', $sqlParams);
+		$sql = "EXEC " . $procName . (!empty($sqlParams) ? " " . implode(', ', $sqlParams) : "");
 		
 		$stmt = sqlsrv_query($this->db, $sql, $sqlArgs);
 		
 		if ($stmt === false) {
 			return $this->error("Chyba při provádění procedury {$procName}: " . print_r(sqlsrv_errors(), true));
 		}
+
+		// ARCHITEKTONICKÁ POJISTKA: 
+		// Pokud procedura v DB není zkompilována s 'SET NOCOUNT ON', MSSQL server pošle informační 
+		// zprávy typu "1 row affected" jako prázdné result sety. Tato smyčka je přeskakuje.
+		while (!sqlsrv_has_rows($stmt)) {
+			$next = sqlsrv_next_result($stmt);
+			if ($next === false) {
+				return $this->error("Chyba při posunu na další výsledek u {$procName}: " . print_r(sqlsrv_errors(), true));
+			} elseif ($next === null) {
+				break; // Konec výsledků, nenalezen žádný dataset
+			}
+		}
 		
-		// Agregace prvního result setu do TSV formátu pro maximální úsporu tokenů v AI kontextu
+		// Agregace výsledku do TSV formátu pro maximální úsporu tokenů v AI kontextu
 		$tsv     = "";                  // Finální textový řetězec obsahující TSV data
 		$isFirst = true;                // Příznak pro prvotní zachycení hlavičky (názvy sloupců)
 		
-		while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-			if ($isFirst) {
-				// Vložení hlavičky oddělené tabulátorem (klíče asociativního pole)
-				$tsv .= implode("\t", array_keys($row)) . "\n";
-				$isFirst = false;
-			}
-			
-			// Sanitize výstupu: zabránění rozbití TSV formátu nahrazením nepovolených znaků
-			$rowStr = array_map(function($val) {
-				if ($val instanceof DateTime) {
-					return $val->format('Y-m-d H:i:s');
+		if (sqlsrv_has_rows($stmt)) {
+			while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+				if ($isFirst) {
+					// Vložení hlavičky oddělené tabulátorem (klíče asociativního pole)
+					$tsv .= implode("\t", array_keys($row)) . "\n";
+					$isFirst = false;
 				}
-				// Nahrazení nových řádků a tabulátorů uvnitř hodnot prostou mezerou
-				return str_replace(["\r", "\n", "\t"], " ", (string)$val);
-			}, $row);
-			
-			$tsv .= implode("\t", $rowStr) . "\n";
+				
+				// Sanitize výstupu: zabránění rozbití TSV formátu nahrazením nepovolených znaků
+				$rowStr = array_map(function($val) {
+					if ($val instanceof DateTime) {
+						return $val->format('Y-m-d H:i:s');
+					}
+					// Nahrazení nových řádků a tabulátorů uvnitř hodnot prostou mezerou
+					return str_replace(["\r", "\n", "\t"], " ", (string)$val);
+				}, $row);
+				
+				$tsv .= implode("\t", $rowStr) . "\n";
+			}
 		}
 		
 		// Ošetření stavu, kdy procedura proběhne úspěšně, ale nevrátí žádný výsledek
