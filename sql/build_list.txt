@@ -1,10 +1,11 @@
 create_tables.sql
+create_report_metadata_tables.sql
+create_table_mcp_saved_values.sql
 p_create_fulltext_catalog.sql
 
 p_xlsx_mcp_tools.sql
 
 # Vytvoøení fulltextových indexù
-
 p_create_fulltext_index.sql
 create_fulltext_indexes.sql
 
@@ -13,6 +14,5 @@ mcp_tool_find_system_workflow.sql
 mcp_tool_read_system_workflow.sql
 mcp_tool_get_user_context.sql
 p_mcp_tools.sql
-
 
 fillup_mcp_tools.sql
