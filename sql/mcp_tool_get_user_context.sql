@@ -10,6 +10,7 @@ select s.user_login
 	,o.name organization_name
 	,r.name review_name
 	,r.language
+	,s.client_ip
 from dbsession s
 	join ramses_user ru on ru.ramses_user=s.ramses_user
 	join organization o on o.organization=s.organization

@@ -69,7 +69,11 @@ try {
 		h1, h2, h3 { margin-top: 0; color: #1a202c; }
 		.ok { color: #1e7e34; font-weight: bold; }
 		.error { color: #d93025; font-weight: bold; }
-		.status-box { padding: 10px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; }
+		
+		/* Optimalizovaný diagnostický box pro úsporu místa */
+		.status-box { padding: 8px 12px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; line-height: 1.3; }
+		.status-box p { margin: 2px 0; font-size: 0.95rem; }
+		
 		table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
 		th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid #edf2f7; vertical-align: top; }
 		th { background: #f8f9fa; color: #4a5568; text-transform: uppercase; font-size: 0.85rem; }
@@ -95,6 +99,7 @@ try {
 			<p><strong>Server:</strong> <code><?php echo htmlspecialchars($config['db']['server'] ?? '---'); ?></code></p>
 			<p><strong>Databáze:</strong> <code><?php echo htmlspecialchars($config['db']['options']['Database'] ?? '---'); ?></code></p>
 			<p><strong>Verze MCP:</strong> <code><?php echo htmlspecialchars($config['mcp']['version'] ?? '---'); ?></code></p>
+			<p><strong>Base URL:</strong> <a href="<?php echo htmlspecialchars($config['mcp']['base_url'] ?? '#'); ?>" target="_blank" style="color: #3182ce; text-decoration: none;"><code><?php echo htmlspecialchars($config['mcp']['base_url'] ?? '---'); ?></code></a></p>
 		</div>
 	</div>
 

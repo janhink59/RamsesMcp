@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * RamsesMcp - index.php (Front Controller & Router)
  * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
- * Toto je jediný vstupní bod (Entry Point) celé aplikace. Všechny požadavky
+ * Tento skript je jediný vstupní bod (Entry Point) celé aplikace. Všechny požadavky
  * (z prohlížeče i od AI klienta) musí procházet přes tento soubor.
  * * * HLAVNÍ ÚKOLY:
  * 1. ROUTING: Směřuje požadavky na základě parametru `?mode=` v URL.
@@ -63,8 +63,11 @@ $virtualDir = dirname($_SERVER['SCRIPT_FILENAME']);
 $parentDir  = dirname($virtualDir); 
 set_include_path(get_include_path() . PATH_SEPARATOR . $parentDir);
 
+// 3. DYNAMICKÁ DETEKCE URL: Inkludujeme modul pro automatické zjištění Base URL serveru
+require_once __DIR__ . '/detect_url.php';
+
 /**
- * 3. DELEGOVÁNÍ (ROUTING):
+ * 4. DELEGOVÁNÍ (ROUTING):
  * Na základě zvoleného režimu inkludujeme příslušný logický soubor.
  */
 switch ($mode) {
