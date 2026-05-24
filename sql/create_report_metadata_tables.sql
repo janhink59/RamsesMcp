@@ -17,7 +17,6 @@ if not exists(select * from v_syscolumns where tabname='mcp_report' and colname=
 	execute dropni 'mcp_report'
 end
 
-
 -- Tabulka definic samotných reportù
 
 IF OBJECT_ID('mcp_report') IS NULL

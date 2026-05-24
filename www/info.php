@@ -3,13 +3,16 @@ declare(strict_types=1);
 
 /**
  * RamsesMcp - info.php (Diagnostický Dashboard)
- * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
+ *
+ * ARCHITEKTONICKÝ KONTEXT (PRO AI):
  * Toto je vizuální diagnostické rozhraní (UI) pro vývojáře. Není součástí
  * standardní JSON-RPC komunikace s AI modely. Vykresluje HTML, nikoliv JSON.
- * * * PŘEDPOKLADY BĚHU:
+ *
+ * PŘEDPOKLADY BĚHU:
  * Soubor je volán výhradně skrze index.php (v režimu ?mode=info), který
  * mu připraví globální proměnnou $config a propláchne výstupní buffer.
- * * * HLAVNÍ CÍLE TOHOTO SOUBORU:
+ *
+ * HLAVNÍ CÍLE TOHOTO SOUBORU:
  * 1. Ověřit nízkoúrovňové připojení k databázi (sqlsrv).
  * 2. Ověřit aplikační přihlášení (set_login) pro uživatele definovaného v configu.
  * 3. Vylistovat dostupné MCP nástroje z DB a nabídnout formuláře pro jejich otestování.
@@ -168,7 +171,33 @@ try {
 									<h3 style="color: #b7791f;">Šablona pro: <?php echo htmlspecialchars($implStatus['target']); ?></h3>
 									<pre class='code-template'><code><?php 
 										if ($tool['is_generic']) {
-											echo htmlspecialchars("CREATE PROCEDURE " . $implStatus['target'] . "\nAS\nBEGIN\n\tSET NOCOUNT ON;\n\tSELECT 'Not implemented' AS Status;\nEND");
+											// Vyhodnocení názvu: pokud chybí title, použijeme fyzický název procedury
+											$toolTitle = (isset($tool['title']) && trim((string)$tool['title']) !== '') ? $tool['title'] : $implStatus['target'];
+											
+											$sqlTemplate  = "/*\n";
+											$sqlTemplate .= "\tNástroj: " . $toolTitle . "\n";
+											
+											// Formátování popisu do víceřádkového komentáře, pokud existuje
+											if (isset($tool['description']) && trim((string)$tool['description']) !== '') {
+												$descLines = explode("\n", $tool['description']);
+												$sqlTemplate .= "\tPopis:   " . array_shift($descLines) . "\n";
+												foreach ($descLines as $line) {
+													$sqlTemplate .= "\t         " . trim($line) . "\n";
+												}
+											}
+											
+											$sqlTemplate .= "*/\n";
+											$sqlTemplate .= "CREATE OR ALTER PROCEDURE " . $implStatus['target'] . "\n";
+											$sqlTemplate .= "AS\n";
+											$sqlTemplate .= "BEGIN\n";
+											$sqlTemplate .= "\tSET NOCOUNT ON;\n";
+											$sqlTemplate .= "\t\n";
+											$sqlTemplate .= "\t-- TODO: Zde implementujte logiku nástroje pro AI\n";
+											$sqlTemplate .= "\tSELECT 'Not implemented' AS Status;\n";
+											$sqlTemplate .= "END\n";
+											$sqlTemplate .= "GO";
+											
+											echo htmlspecialchars($sqlTemplate);
 										} else {
 											echo htmlspecialchars("<?php\nclass " . str_replace('.php', '', $implStatus['target']) . " extends McpTool {\n\tpublic function execute(array \$params): array {\n\t\treturn \$this->success(\"Nástroj zatím není implementován.\");\n\t}\n}");
 										}

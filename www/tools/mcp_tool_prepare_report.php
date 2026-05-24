@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * RamsesMcp - Get_prepare_report.php
+ * RamsesMcp - mcp_tool_prepare_report.php
  * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
  * Tento non-generic MCP nástroj slouží jako finální validační brána před zobrazením
  * reportu uživateli. Umělá inteligence jej zavolá ve chvíli, kdy si myslí, že
@@ -14,7 +14,7 @@ declare(strict_types=1);
  * 4. Pokud něco chybí, vrátí TSV s rows=-1 a vyjmenuje chybějící data.
  * 5. Pokud je vše OK, vygeneruje absolutní proklikávací URL s využitím globální detekce Base URL.
  */
-class Get_prepare_report extends McpTool {
+class mcp_tool_prepare_report extends McpTool {
 	
 	/**
 	 * Hlavní výkonná metoda.

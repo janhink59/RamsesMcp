@@ -7,7 +7,8 @@ declare(strict_types=1);
  * ARCHITEKTONICKÝ KONTEXT (PRO AI):
  * Tento non-generic MCP nástroj umožňuje modelu umělé inteligence explicitně
  * zapisovat nebo mazat hodnoty v dočasné paměti chatu (mcp_saved_values).
- * * LOGIKA POLE (ARRAY):
+ *
+ * LOGIKA POLE (ARRAY):
  * Nástroj podporuje ukládání polí opakovaným voláním se stejným názvem proměnné.
  * AI tak může například postupně uložit 3 různá ID do stejného pole.
  * Pokud se předá pouze variable_name (bez variable_value), celá proměnná se vymaže.
@@ -17,8 +18,8 @@ class mcp_tool_set_context_variable extends McpTool {
 	/**
 	 * Hlavní výkonná metoda.
 	 *
-	 * @param array $params
-	 * @return array
+	 * @param array $params Očekávané parametry (variable_name, volitelně variable_value)
+	 * @return array        Standardní formátovaná odpověď pro MCP (TSV struktura)
 	 */
 	public function execute(array $params): array {
 		// 1. Získání identifikátoru aktuální databázové relace

@@ -163,7 +163,8 @@ class db_interface {
 		}
 
 		$tool     = $this->mcp_tool_list[$tool_name];
-		$pureName = preg_replace('/[^a-zA-Z0-9_]/', '', $tool_name);
+		// Nová konvence: vše převedeno na malá písmena
+		$pureName = preg_replace('/[^a-zA-Z0-9_]/', '', strtolower($tool_name));
 
 		if ($tool['is_generic']) {
 			$procName = "mcp_tool_" . $pureName;
@@ -172,7 +173,8 @@ class db_interface {
 			$exists   = ($stmt !== false && sqlsrv_has_rows($stmt));
 			return ['exists' => $exists, 'target' => $procName];
 		} else {
-			$className = "Get_" . $pureName;
+			// Stejná názvová konvence pro PHP třídy
+			$className = "mcp_tool_" . $pureName;
 			$classFile = __DIR__ . "/tools/" . $className . ".php";
 			return ['exists' => file_exists($classFile), 'target' => $className . ".php"];
 		}
@@ -180,7 +182,8 @@ class db_interface {
 
 	/**
 	 * HLAVNÍ EXEKUČNÍ BOD: Orchestruje spuštění logiky konkrétního nástroje.
-	 * * @param string $tool_name Název nástroje
+	 *
+	 * @param string $tool_name Název nástroje
 	 * @param array<string, mixed>|null $params Asociativní pole vstupních parametrů
 	 * @return bool True při úspěchu, False při chybě
 	 */
@@ -225,8 +228,9 @@ class db_interface {
 			/** @var McpTool $instance */
 			$instance = new McpGenericStoredProc($this->db, $tool_name, $execDefs);
 		} else {
-			$pureName  = preg_replace('/[^a-zA-Z0-9_]/', '', $tool_name);
-			$className = "Get_" . $pureName;
+			// Nová konvence pro načítání PHP tříd z adresáře /tools/
+			$pureName  = preg_replace('/[^a-zA-Z0-9_]/', '', strtolower($tool_name));
+			$className = "mcp_tool_" . $pureName;
 			$classFile = __DIR__ . "/tools/" . $className . ".php";
 
 			if (!file_exists($classFile)) {
