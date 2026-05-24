@@ -5,6 +5,8 @@
 --drop table if exists mcp_log
 --drop table if exists mcp_scenario
 
+execute p_drop_excel_tables
+GO
 -- Tabulka nástrojů
 if object_id('mcp_tool') is null
 CREATE TABLE mcp_tool (

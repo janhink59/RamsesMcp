@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
 :: ----------------------------------------------------------
@@ -20,13 +21,17 @@ if not exist "%MANIFEST_FILE%" (
 :: Vyčištění (smazání) předchozího výstupu, pokud existuje
 if exist "%OUTPUT_FILE%" del "%OUTPUT_FILE%"
 
+:: Vložení neviditelného znaku BOM (Byte Order Mark) pro UTF-8
+:: Toto donutí SSMS, aby soubor automaticky otevřelo s kódováním UTF-8
+powershell -Command "[IO.File]::WriteAllBytes('%OUTPUT_FILE%', [byte[]](239,187,191))"
+
 echo Sestavuji skript "%OUTPUT_FILE%"...
 echo.
 
-:: Zápis hlavičky do výsledného souboru
-echo /* ========================================== > "%OUTPUT_FILE%"
+:: Zápis hlavičky do výsledného souboru (změněno z > na >>, aby se nesmazal BOM)
+echo /* ========================================== >> "%OUTPUT_FILE%"
 echo  * RamsesDB Auto-Deploy Build >> "%OUTPUT_FILE%"
-echo  * Vygenerovano %date% %time% >> "%OUTPUT_FILE%"
+echo  * Vygenerováno %date% %time% >> "%OUTPUT_FILE%"
 echo  * ========================================== */ >> "%OUTPUT_FILE%"
 echo. >> "%OUTPUT_FILE%"
 
