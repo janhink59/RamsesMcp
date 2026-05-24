@@ -1,15 +1,15 @@
 -- =========================================================================================
 -- * RamsesMcp - create_report_metadata_tables.sql
 -- *
--- * ARCHITEKTONICKİ KONTEXT (PRO AI):
--- * Tento skript definuje databázové struktury pro ukládání metadat komplexních reportù.
--- * Tyto tabulky jsou nezávislé na popisech agentickıch workflow (mcp_scenario).
--- * Slouí jako zdroj pravdy pro flexible_report.php, kterı na základì zde definovanıch
--- * datovıch typù provádí striktní typovou kontrolu (Type Casting) pøedanıch parametrù.
+-- * ARCHITEKTONICKÃ KONTEXT (PRO AI):
+-- * Tento skript definuje databÃ¡zovÃ© struktury pro uklÃ¡dÃ¡nÃ­ metadat komplexnÃ­ch reportÅ¯.
+-- * Tyto tabulky jsou nezÃ¡vislÃ© na popisech agentickÃ½ch workflow (mcp_scenario).
+-- * SlouÅ¾Ã­ jako zdroj pravdy pro flexible_report.php, kterÃ½ na zÃ¡kladÄ› zde definovanÃ½ch
+-- * datovÃ½ch typÅ¯ provÃ¡dÃ­ striktnÃ­ typovou kontrolu (Type Casting) pÅ™edanÃ½ch parametrÅ¯.
 -- *
--- * VZTAH K OSTATNÍM VRSTVÁM:
--- * mcp_scenario definuje textovı návod pro AI, kdy má uivateli nabídnout odkaz na report.
--- * mcp_report (tato tabulka) definuje technickı kontrakt mezi MCP serverem a jádrem Ramses.
+-- * VZTAH K OSTATNÃM VRSTVÃM:
+-- * mcp_scenario definuje textovÃ½ nÃ¡vod pro AI, kdy mÃ¡ uÅ¾ivateli nabÃ­dnout odkaz na report.
+-- * mcp_report (tato tabulka) definuje technickÃ½ kontrakt mezi MCP serverem a jÃ¡drem Ramses.
 -- =========================================================================================
 
 if not exists(select * from v_syscolumns where tabname='mcp_report' and colname='report_code') begin
@@ -17,7 +17,7 @@ if not exists(select * from v_syscolumns where tabname='mcp_report' and colname=
 	execute dropni 'mcp_report'
 end
 
--- Tabulka definic samotnıch reportù
+-- Tabulka definic samotnÃ½ch reportÅ¯
 
 IF OBJECT_ID('mcp_report') IS NULL
 CREATE TABLE mcp_report (
@@ -26,7 +26,7 @@ CREATE TABLE mcp_report (
 	description NVARCHAR(MAX) NULL
 );
 GO
--- Tabulka definic parametrù reportù pro typovou validaci
+-- Tabulka definic parametrÅ¯ reportÅ¯ pro typovou validaci
 IF OBJECT_ID('mcp_report_param') IS NULL
 CREATE TABLE mcp_report_param (
 	report_code VARCHAR(50) NOT NULL CONSTRAINT fk_mcp_report_param_report REFERENCES mcp_report(report_code) ON DELETE CASCADE,
