@@ -5,9 +5,10 @@ AS
 BEGIN
 	SET NOCOUNT ON;
 
-	select ru.login
+	select
+		o.organization_uuid organization_guid
+		,ru.login
 		,o.name
-		,o.organization_uuid organization_guid
 		,ou.right_orgadmin
 		,ou.right_reader
 		,o.disabled oorganization_is_disabled

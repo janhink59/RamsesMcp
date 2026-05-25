@@ -2,62 +2,62 @@
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
-:: ----------------------------------------------------------
-:: RamsesDB - Nástroj pro sestavení databázových skriptů
-:: ----------------------------------------------------------
+REM ----------------------------------------------------------
+REM RamsesDB - Nastroj pro sestaveni databazovych skriptu
+REM ----------------------------------------------------------
 
-:: Nastavení cest (předpokládá, že vše je ve stejné složce)
+REM Nastaveni cest (predpoklada, ze vse je ve stejne slozce)
 set "MANIFEST_FILE=build_list.txt"
 set "OUTPUT_FILE=--McpDeploy.sql"
 
-:: Kontrola, zda existuje manifest
+REM Kontrola, zda existuje manifest
 if not exist "%MANIFEST_FILE%" (
 	echo [CHYBA] Soubor manifestu "%MANIFEST_FILE%" nebyl nalezen!
-	echo Vytvorte soubor "%MANIFEST_FILE%".txt se seznamem SQL skriptu.
+	echo Vytvorte soubor "%MANIFEST_FILE%" se seznamem SQL skriptu.
 	pause
 	exit /b 1
 )
 
-:: Vyčištění (smazání) předchozího výstupu, pokud existuje
+REM Vycisteni (smazani) predchoziho vystupu, pokud existuje
 if exist "%OUTPUT_FILE%" del "%OUTPUT_FILE%"
 
-:: Vložení neviditelného znaku BOM (Byte Order Mark) pro UTF-8
-:: Toto donutí SSMS, aby soubor automaticky otevřelo s kódováním UTF-8
+REM Vlozeni neviditelneho znaku BOM (Byte Order Mark) pro UTF-8
+REM Toto donuti SSMS, aby soubor automaticky otevrelo s kodovanim UTF-8
 powershell -Command "[IO.File]::WriteAllBytes('%OUTPUT_FILE%', [byte[]](239,187,191))"
 
 echo Sestavuji skript "%OUTPUT_FILE%"...
 echo.
 
-:: Zápis hlavičky do výsledného souboru (změněno z > na >>, aby se nesmazal BOM)
+REM Zapis hlavicky do vysledneho souboru (ciste ASCII)
 echo /* ========================================== >> "%OUTPUT_FILE%"
 echo  * RamsesDB Auto-Deploy Build >> "%OUTPUT_FILE%"
-echo  * Vygenerováno %date% %time% >> "%OUTPUT_FILE%"
+echo  * Vygenerovano %date% %time% >> "%OUTPUT_FILE%"
 echo  * ========================================== */ >> "%OUTPUT_FILE%"
 echo. >> "%OUTPUT_FILE%"
 
 set "FILE_COUNT=0"
 
-:: Čtení manifestu řádek po řádku
+REM Cteni manifestu radek po radku
 for /f "usebackq tokens=* delims=" %%A in ("%MANIFEST_FILE%") do (
 	set "LINE=%%A"
 	
-	:: Ignorování prázdných řádků
+	REM Ignorovani prazdnych radku
 	if not "!LINE!"=="" (
-		:: Kontrola, zda řádek nezačíná komentářem (#)
+		REM Kontrola, zda radek nezacina komentarem (#)
 		set "FIRST_CHAR=!LINE:~0,1!"
 		if not "!FIRST_CHAR!"=="#" (
 			
-			:: Kontrola existence SQL souboru
+			REM Kontrola existence SQL souboru
 			if exist "!LINE!" (
 				echo Pridavam: !LINE!
 				
-				:: Zápis komentáře, odkud kód pochází
+				REM Zapis komentare cistym ASCII textem pro bezpeci kodovani
 				echo /* --- Nacteno z: !LINE! --- */ >> "%OUTPUT_FILE%"
 				
-				:: Připojení obsahu SQL souboru k výstupu
+				REM Pripojeni obsahu SQL souboru k vystupu
 				type "!LINE!" >> "%OUTPUT_FILE%"
 				
-				:: Vložení nového řádku a příkazu GO pro oddělení dávek (batche) v MSSQL
+				REM Vlozeni noveho radku a prikazu GO pro oddeleni davek v MSSQL
 				echo. >> "%OUTPUT_FILE%"
 				echo GO >> "%OUTPUT_FILE%"
 				echo. >> "%OUTPUT_FILE%"
@@ -77,11 +77,16 @@ echo ----------------------------------------------------------
 for %%F in (mcp_tool_*.sql) do (
 	if exist "%%F" (
 		echo Pridavam nastroj: %%F
+		
+		REM Zapis metadatoveho komentare cistym ASCII textem
 		echo /* --- Automaticky nacteno z adresare: %%F --- */ >> "%OUTPUT_FILE%"
+		
 		type "%%F" >> "%OUTPUT_FILE%"
+		
 		echo. >> "%OUTPUT_FILE%"
 		echo GO >> "%OUTPUT_FILE%"
 		echo. >> "%OUTPUT_FILE%"
+		
 		set /a FILE_COUNT+=1
 	)
 )

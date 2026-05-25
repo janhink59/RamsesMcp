@@ -13,7 +13,8 @@ class McpGenericStoredProc extends McpTool {
 
 	/**
 	 * Konstruktor rozšířený o název nástroje a jeho parametry.
-	 * * @param resource $db          Aktivní spojení na MSSQL přes sqlsrv_connect
+	 *
+	 * @param resource $db          Aktivní spojení na MSSQL přes sqlsrv_connect
 	 * @param string   $toolName    Název volaného nástroje
 	 * @param array    $definitions Struktura očekávaných parametrů pro validaci
 	 */
@@ -26,7 +27,8 @@ class McpGenericStoredProc extends McpTool {
 	/**
 	 * Sestaví SQL příkaz EXEC pro dynamické volání uložené procedury.
 	 * Parametry jsou bezpečně předány přes nativní binding sqlsrv.
-	 * * @param array<string, mixed> $params  Vstupní argumenty od klienta (Ollamy)
+	 *
+	 * @param array<string, mixed> $params  Vstupní argumenty od klienta (Ollamy)
 	 * @return array                        Formátovaná JSON-RPC odpověď s TSV obsahem
 	 */
 	public function execute(array $params): array {
@@ -81,12 +83,15 @@ class McpGenericStoredProc extends McpTool {
 		// Agregace výsledku do TSV formátu pro maximální úsporu tokenů v AI kontextu
 		$tsv     = "";                  // Finální textový řetězec obsahující TSV data
 		$isFirst = true;                // Příznak pro prvotní zachycení hlavičky (názvy sloupců)
+		$rowNum  = 1;                   // Počítadlo pro umělé číslované řádky napomáhající UI AI modelu
 		
 		if (sqlsrv_has_rows($stmt)) {
 			while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
 				if ($isFirst) {
 					// Vložení hlavičky oddělené tabulátorem (klíče asociativního pole)
-					$tsv .= implode("\t", array_keys($row)) . "\n";
+					// Injekce sloupce row_number na absolutně první pozici výstupní sady
+					$headers = array_merge(['row_number'], array_keys($row));
+					$tsv .= implode("\t", $headers) . "\n";
 					$isFirst = false;
 				}
 				
@@ -99,7 +104,11 @@ class McpGenericStoredProc extends McpTool {
 					return str_replace(["\r", "\n", "\t"], " ", (string)$val);
 				}, $row);
 				
-				$tsv .= implode("\t", $rowStr) . "\n";
+				// Bezpečné vložení umělého čísla řádku na začátek datového proudu
+				$finalRowValues = array_merge([(string)$rowNum], array_values($rowStr));
+				
+				$tsv .= implode("\t", $finalRowValues) . "\n";
+				$rowNum++;
 			}
 		}
 		

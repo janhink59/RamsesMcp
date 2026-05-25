@@ -10,6 +10,7 @@ BEGIN
 	-- Pokud není volitelná součást nainstalována, tiše opouštíme proceduru.
 	IF SERVERPROPERTY('IsFullTextInstalled') <> 1
 	BEGIN
+		print 'Fulltextová podpora není nainstalována!'
 		RETURN;
 	END
 
