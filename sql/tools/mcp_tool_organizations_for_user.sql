@@ -1,5 +1,6 @@
-
-CREATE or alter PROCEDURE mcp_tool_organizations_for_user
+drop procedure if exists mcp_tool_organizations_for_user
+GO
+CREATE PROCEDURE mcp_tool_organizations_for_user
 	@login NVARCHAR(MAX)
 AS
 BEGIN
