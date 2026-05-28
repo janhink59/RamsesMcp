@@ -188,6 +188,33 @@ try {
 											
 											$sqlTemplate .= "*/\n";
 											$sqlTemplate .= "CREATE OR ALTER PROCEDURE " . $implStatus['target'] . "\n";
+											
+											// Generování deklarace parametrů s typováním
+											if (!empty($params[$tName])) {
+												$paramLines = [];
+												foreach ($params[$tName] as $p) {
+													if ($p['param_name'] === 'save_as') {
+														continue;                                   // Ignorujeme orchestrátorem spravovaný alias
+													}
+													
+													$sqlType = 'NVARCHAR(MAX)';                     // Výchozí fallback
+													$pType = strtolower((string)$p['param_type']);
+													
+													if ($pType === 'uuid' || $pType === 'guid') {
+														$sqlType = 'UNIQUEIDENTIFIER';
+													} elseif ($pType === 'number' || $pType === 'int') {
+														$sqlType = 'INT';
+													} elseif ($pType === 'bit') {
+														$sqlType = 'BIT';
+													}
+													
+													$paramLines[] = "\t@" . $p['param_name'] . " " . $sqlType;
+												}
+												if (!empty($paramLines)) {
+													$sqlTemplate .= implode(",\n", $paramLines) . "\n";
+												}
+											}
+											
 											$sqlTemplate .= "AS\n";
 											$sqlTemplate .= "BEGIN\n";
 											$sqlTemplate .= "\tSET NOCOUNT ON;\n";

@@ -7,6 +7,17 @@
 
 execute p_drop_excel_tables
 GO
+-- Zde se odstraní tabulky, které byly změměny
+if not exists(select * from v_syscolumns where tabname = 'mcp_tool' and colname='more_results')
+	or not exists(select * from v_syscolumns where tabname = 'mcp_report' and colname='more_results')
+
+begin
+    execute dropni 'mcp_tool_param'
+    execute dropni 'mcp_tool'
+    execute dropni 'mcp_report_param'
+    execute dropni 'mcp_report'
+end
+GO
 -- Tabulka nástrojů
 if object_id('mcp_tool') is null
 CREATE TABLE mcp_tool (
@@ -14,18 +25,20 @@ CREATE TABLE mcp_tool (
     name VARCHAR(100) NOT NULL UNIQUE,
 	title varchar(100) default '' not null,
 	is_generic bit default 1 not null,
+    more_results bit default 0 not null,
     description VARCHAR(MAX) NOT NULL
 );
 
 -- Tabulka parametrů
 if object_id('mcp_tool_param') is null
 CREATE TABLE mcp_tool_param (
-    mcp_tool UNIQUEIDENTIFIER NOT NULL references mcp_tool on delete cascade,
+    mcp_tool UNIQUEIDENTIFIER NOT NULL /* references mcp_tool on delete cascade */,
     param_name VARCHAR(100) NOT NULL,
 	param_title varchar(100) default '' not null,
     param_type VARCHAR(50) NOT NULL, -- "string", "number", "uuid"
     description VARCHAR(MAX),
     is_required BIT DEFAULT 1,
+    primary key (mcp_tool, param_name)
 );
 
 -- Tabulka pro logování MCP requestů a odpovědí

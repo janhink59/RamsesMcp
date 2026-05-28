@@ -12,19 +12,22 @@
 -- * mcp_report (tato tabulka) definuje technický kontrakt mezi MCP serverem a jádrem Ramses.
 -- =========================================================================================
 
-if not exists(select * from v_syscolumns where tabname='mcp_report' and colname='procedure_name') begin
+if not exists(select * from v_syscolumns where tabname='mcp_report' and colname='more_results') begin
 	execute dropni 'mcp_report_param'
 	execute dropni 'mcp_report'
 end
 
+GO
 -- Tabulka definic samotných reportů
 
 IF OBJECT_ID('mcp_report') IS NULL
 CREATE TABLE mcp_report (
 	report_code VARCHAR(50) CONSTRAINT pk_mcp_report PRIMARY KEY,
 	procedure_name varchar(40) not null,
+	is_generic bit default 1 not null,
+    more_results bit default 0 not null,
 	title NVARCHAR(200) NOT NULL,
-	description NVARCHAR(MAX) NULL
+	description NVARCHAR(MAX) NULL,
 );
 GO
 -- Tabulka definic parametrů reportů pro typovou validaci

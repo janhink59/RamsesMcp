@@ -27,6 +27,7 @@ class McpGenericStoredProc extends McpTool {
 	/**
 	 * Sestaví SQL příkaz EXEC pro dynamické volání uložené procedury.
 	 * Parametry jsou bezpečně předány přes nativní binding sqlsrv.
+	 * Zpracovává libovolné množství vrácených result-setů.
 	 *
 	 * @param array<string, mixed> $params  Vstupní argumenty od klienta (Ollamy)
 	 * @return array                        Formátovaná JSON-RPC odpověď s TSV obsahem
@@ -68,57 +69,89 @@ class McpGenericStoredProc extends McpTool {
 			return $this->error("Chyba při provádění procedury {$procName}: " . print_r(sqlsrv_errors(), true));
 		}
 
+		$finalOutput  = "";             // Agregovaný textový výstup všech bloků
+		$dataSetCount = 0;              // Počítadlo nalezených datových bloků
+		$next         = true;           // Řídící proměnná pro posun kurzoru
+		
 		// ARCHITEKTONICKÁ POJISTKA: 
-		// Pokud procedura v DB není zkompilována s 'SET NOCOUNT ON', MSSQL server pošle informační 
-		// zprávy typu "1 row affected" jako prázdné result sety. Tato smyčka je přeskakuje.
-		while (!sqlsrv_has_rows($stmt)) {
+		// Smyčka iteruje přes všechny dostupné výsledkové sady (result sets).
+		// Ignoruje prázdné zprávy ("1 row affected") díky kontrole sqlsrv_has_rows.
+		do {
+			if (sqlsrv_has_rows($stmt)) {
+				$tsv       = "";        // Textový buffer pro aktuální blok
+				$isFirst   = true;      // Příznak prvního řádku (hlavička)
+				$rowNum    = 1;         // Počítadlo umělých řádků, resetuje se pro každý blok
+				$blockName = null;      // Tag nadpisu aktuálního bloku
+				
+				while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+					if ($isFirst) {
+						$headers = array_keys($row);
+						
+						// Detekce a zpracování speciálního řídícího sloupce
+						if (array_key_exists('__block_name', $row)) {
+							$blockName = (string)$row['__block_name'];
+							// Vyřazení řídícího sloupce, aby se nedostal do datové struktury
+							$headers = array_filter($headers, fn($k) => $k !== '__block_name');
+						}
+						
+						// Injekce umělého identifikátoru na první pozici pro AI modely
+						$headers = array_merge(['row_number'], array_values($headers));
+						
+						// Aplikace vizuálního oddělovače bloku pro kontext
+						if ($blockName !== null && $blockName !== '') {
+							$tsv .= "=== " . $blockName . " ===\n";
+						} elseif ($dataSetCount > 0) {
+							// Nouzový záchyt, pokud procedura vrací více bloků bez popisku
+							$tsv .= "=== RESULT_SET_" . ($dataSetCount + 1) . " ===\n";
+						}
+						
+						$tsv .= implode("\t", $headers) . "\n";
+						$isFirst = false;
+					}
+					
+					// Zpracování dat s ignorováním řídících informací
+					$rowStr = [];
+					foreach ($row as $key => $val) {
+						if ($key === '__block_name') continue;
+						
+						if ($val instanceof DateTime) {
+							$rowStr[] = $val->format('Y-m-d H:i:s');
+						} else {
+							// Bezpečná sanitizace: blokace rozbití TSV rozložení
+							$rowStr[] = str_replace(["\r", "\n", "\t"], " ", (string)$val);
+						}
+					}
+					
+					// Finalizace datového řádku 
+					$finalRowValues = array_merge([(string)$rowNum], $rowStr);
+					$tsv .= implode("\t", $finalRowValues) . "\n";
+					$rowNum++;
+				}
+				
+				// Sestavení celkového formátu za sebou
+				if (!$isFirst) {
+					if ($dataSetCount > 0) {
+						$finalOutput .= "\n"; 
+					}
+					$finalOutput .= $tsv;
+					$dataSetCount++;
+				}
+			}
+			
+			// Posun na další result-set a kontrola chyb
 			$next = sqlsrv_next_result($stmt);
 			if ($next === false) {
 				return $this->error("Chyba při posunu na další výsledek u {$procName}: " . print_r(sqlsrv_errors(), true));
-			} elseif ($next === null) {
-				break; // Konec výsledků, nenalezen žádný dataset
 			}
-		}
+		} while ($next !== null);
 		
-		// Agregace výsledku do TSV formátu pro maximální úsporu tokenů v AI kontextu
-		$tsv     = "";                  // Finální textový řetězec obsahující TSV data
-		$isFirst = true;                // Příznak pro prvotní zachycení hlavičky (názvy sloupců)
-		$rowNum  = 1;                   // Počítadlo pro umělé číslované řádky napomáhající UI AI modelu
-		
-		if (sqlsrv_has_rows($stmt)) {
-			while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-				if ($isFirst) {
-					// Vložení hlavičky oddělené tabulátorem (klíče asociativního pole)
-					// Injekce sloupce row_number na absolutně první pozici výstupní sady
-					$headers = array_merge(['row_number'], array_keys($row));
-					$tsv .= implode("\t", $headers) . "\n";
-					$isFirst = false;
-				}
-				
-				// Sanitize výstupu: zabránění rozbití TSV formátu nahrazením nepovolených znaků
-				$rowStr = array_map(function($val) {
-					if ($val instanceof DateTime) {
-						return $val->format('Y-m-d H:i:s');
-					}
-					// Nahrazení nových řádků a tabulátorů uvnitř hodnot prostou mezerou
-					return str_replace(["\r", "\n", "\t"], " ", (string)$val);
-				}, $row);
-				
-				// Bezpečné vložení umělého čísla řádku na začátek datového proudu
-				$finalRowValues = array_merge([(string)$rowNum], array_values($rowStr));
-				
-				$tsv .= implode("\t", $finalRowValues) . "\n";
-				$rowNum++;
-			}
-		}
-		
-		// Ošetření stavu, kdy procedura proběhne úspěšně, ale nevrátí žádný výsledek
-		if ($isFirst) {
-			$tsv = "Žádná data nebyla nalezena.";
+		// Finální fallback výstup, pokud se nenačetla z žádného bloku data
+		if ($dataSetCount === 0) {
+			$finalOutput = "Žádná data nebyla nalezena.";
 		} else {
-			$tsv = "Nalezena data:\n" . $tsv;
+			$finalOutput = trim($finalOutput);
 		}
 		
-		return $this->success($tsv);
+		return $this->success($finalOutput);
 	}
 }

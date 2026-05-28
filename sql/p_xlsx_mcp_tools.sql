@@ -3,6 +3,9 @@ GO
 /*
 	Standardní import dat z Excelu (Knowledge Base)
 	Zajišťuje plný import nástrojů, reportů a agentických scénářů z jednoho zdroje.
+
+	execute p_drop_excel_tables
+
 */
 create procedure p_xlsx_mcp_tools
 	@import_mode varchar(1)='1'
@@ -20,11 +23,12 @@ delete from mcp_report
 -- =====================================================================
 -- 1. IMPORT NÁSTROJŮ (MCP TOOLS)
 -- =====================================================================
-insert into mcp_tool(mcp_tool,name,description,is_generic)
+insert into mcp_tool(mcp_tool,name,description,is_generic,more_results)
 select hashbytes('MD5',N'mcp_tool.'+t.name)
 	,t.name
 	,t.description
-	,t.is_generic
+	,coalesce(t.is_generic,0)
+	,coalesce(t.more_results,0)
 from XLSX_mcp_tool$ t
 
 insert into mcp_tool_param(mcp_tool,param_name,param_title,param_type,description,is_required)
@@ -60,11 +64,13 @@ WHERE
 -- =====================================================================
 -- 2. IMPORT REPORTŮ (MCP REPORTS)
 -- =====================================================================
-insert into mcp_report(report_code, title, procedure_name, description)
+insert into mcp_report(report_code, title, procedure_name, description, is_generic, more_results)
 select r.report_code
 	,r.title
 	,r.procedure_name
 	,r.description
+	,coalesce(r.is_generic,0)
+	,coalesce(r.more_results,0)
 from XLSX_mcp_report$ r
 
 insert into mcp_report_param(report_code, param_name, param_title, param_type, is_array, description, is_required)
