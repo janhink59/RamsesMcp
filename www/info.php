@@ -131,7 +131,12 @@ try {
 							<code><?php echo $safeName; ?></code><br>
 							<small style="color: #718096;"><?php echo $tool['is_generic'] ? '📦 SQL' : '🛠️ PHP'; ?></small>
 						</td>
-						<td><?php echo htmlspecialchars($tool['description']); ?></td>
+						<td>
+							<?php if (!empty($tool['title'])): ?>
+								<strong><?php echo htmlspecialchars($tool['title']); ?></strong><br>
+							<?php endif; ?>
+							<?php echo htmlspecialchars($tool['description']); ?>
+						</td>
 						<td>
 							<?php if ($implStatus['exists']): ?>
 								<span class="ok">✅ OK</span>
@@ -148,7 +153,7 @@ try {
 							<div id="wrapper_<?php echo $safeName; ?>" class="test-wrapper">
 								<?php if ($implStatus['exists']): ?>
 									<div class="parameter-section">
-										<h3>Parametry: <?php echo $safeName; ?></h3>
+										<h3>Parametry: <?php echo !empty($tool['title']) ? htmlspecialchars($tool['title']) : $safeName; ?></h3>
 										<form id="form_<?php echo $safeName; ?>">
 											<input type="hidden" name="tool_name" value="<?php echo $safeName; ?>">
 											<?php if (empty($params[$tName])): ?>
@@ -156,7 +161,10 @@ try {
 											<?php else: ?>
 												<?php foreach ($params[$tName] as $p): ?>
 													<div class="input-group">
-														<label><?php echo htmlspecialchars($p['param_name']); ?>:</label>
+														<label>
+															<?php echo htmlspecialchars($p['param_title'] ?: $p['param_name']); ?>
+															<span style="color: #718096; font-weight: normal; font-size: 0.8rem;">(<?php echo htmlspecialchars($p['param_name']); ?>)</span>:
+														</label>
 														<input type="text" name="params[<?php echo htmlspecialchars($p['param_name']); ?>]">
 													</div>
 												<?php endforeach; ?>
@@ -171,8 +179,8 @@ try {
 									<h3 style="color: #b7791f;">Šablona pro: <?php echo htmlspecialchars($implStatus['target']); ?></h3>
 									<pre class='code-template'><code><?php 
 										if ($tool['is_generic']) {
-											// Vyhodnocení názvu: pokud chybí title, použijeme fyzický název procedury
-											$toolTitle = (isset($tool['title']) && trim((string)$tool['title']) !== '') ? $tool['title'] : $implStatus['target'];
+											// Vyhodnocení názvu: prioritně title z DB, fallback na system name, jinak fyzický cíl
+											$toolTitle = !empty($tool['title']) ? $tool['title'] : (!empty($tName) ? $tName : $implStatus['target']);
 											
 											$sqlTemplate  = "/*\n";
 											$sqlTemplate .= "\tNástroj: " . $toolTitle . "\n";
@@ -189,29 +197,57 @@ try {
 											$sqlTemplate .= "*/\n";
 											$sqlTemplate .= "CREATE OR ALTER PROCEDURE " . $implStatus['target'] . "\n";
 											
-											// Generování deklarace parametrů s typováním
+											// Generování deklarace parametrů s typováním a zarovnanými komentáři včetně titulků
 											if (!empty($params[$tName])) {
-												$paramLines = [];
-												foreach ($params[$tName] as $p) {
-													if ($p['param_name'] === 'save_as') {
-														continue;                                   // Ignorujeme orchestrátorem spravovaný alias
+												$validParams = array_values(array_filter($params[$tName], fn($p) => $p['param_name'] !== 'save_as'));
+												
+												if (!empty($validParams)) {
+													$maxDeclLen = 0;
+													$parsedParams = [];
+													
+													foreach ($validParams as $p) {
+														$sqlType = 'NVARCHAR(MAX)';                     // Výchozí fallback
+														$pType = strtolower((string)$p['param_type']);
+														
+														if ($pType === 'uuid' || $pType === 'guid') {
+															$sqlType = 'UNIQUEIDENTIFIER';
+														} elseif ($pType === 'number' || $pType === 'int') {
+															$sqlType = 'INT';
+														} elseif ($pType === 'bit') {
+															$sqlType = 'BIT';
+														}
+														
+														$decl = "@" . $p['param_name'] . " " . $sqlType;
+														if (strlen($decl) > $maxDeclLen) {
+															$maxDeclLen = strlen($decl);
+														}
+														
+														$parsedParams[] = [
+															'decl'  => $decl,
+															'req'   => $p['is_required'] ? 'Povinný' : 'Volitelný',
+															'title' => trim((string)($p['param_title'] ?? '')),
+															'desc'  => trim(str_replace(["\r", "\n", "\t"], " ", (string)($p['description'] ?? '')))
+														];
 													}
 													
-													$sqlType = 'NVARCHAR(MAX)';                     // Výchozí fallback
-													$pType = strtolower((string)$p['param_type']);
-													
-													if ($pType === 'uuid' || $pType === 'guid') {
-														$sqlType = 'UNIQUEIDENTIFIER';
-													} elseif ($pType === 'number' || $pType === 'int') {
-														$sqlType = 'INT';
-													} elseif ($pType === 'bit') {
-														$sqlType = 'BIT';
+													$paramLines = [];
+													$total = count($parsedParams);
+													foreach ($parsedParams as $i => $pp) {
+														$comma = ($i < $total - 1) ? "," : "";
+														$padDecl = str_pad($pp['decl'] . $comma, $maxDeclLen + 1, " ");
+														
+														$comment = "-- [" . $pp['req'] . "]";
+														if ($pp['title'] !== '') {
+															$comment .= " " . $pp['title'];
+															if ($pp['desc'] !== '') $comment .= " -";
+														}
+														if ($pp['desc'] !== '') {
+															$comment .= " " . $pp['desc'];
+														}
+														
+														$paramLines[] = "\t" . $padDecl . " " . $comment;
 													}
-													
-													$paramLines[] = "\t@" . $p['param_name'] . " " . $sqlType;
-												}
-												if (!empty($paramLines)) {
-													$sqlTemplate .= implode(",\n", $paramLines) . "\n";
+													$sqlTemplate .= implode("\n", $paramLines) . "\n";
 												}
 											}
 											
@@ -220,6 +256,11 @@ try {
 											$sqlTemplate .= "\tSET NOCOUNT ON;\n";
 											$sqlTemplate .= "\t\n";
 											$sqlTemplate .= "\t-- TODO: Zde implementujte logiku nástroje pro AI\n";
+											$sqlTemplate .= "\t\n";
+											$sqlTemplate .= "\t-- Příklad pro vracení více datových sad (Multi Result-Sets):\n";
+											$sqlTemplate .= "\t-- SELECT 'Základní info' AS __block_name, 'Hodnota' AS Sloupec1;\n";
+											$sqlTemplate .= "\t-- SELECT 'Detailní data' AS __block_name, 'Hodnota' AS Sloupec1;\n";
+											$sqlTemplate .= "\t\n";
 											$sqlTemplate .= "\tSELECT 'Not implemented' AS Status;\n";
 											$sqlTemplate .= "END\n";
 											$sqlTemplate .= "GO";

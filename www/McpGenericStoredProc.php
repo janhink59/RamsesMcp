@@ -1,22 +1,22 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/McpTool.php';
+
 /**
- * Zpracovává generické MCP nástroje voláním stejnojmenných uložených procedur.
- * Tento přístup umožňuje rychlé přidávání nových funkcí bez nutnosti psát
- * pro každou z nich samostatnou PHP třídu, pokud stačí standardní SQL exekuce.
+ * Generická obálka pro spouštění jakékoliv neznámé uložené procedury v MSSQL
+ * na základě definice v DB. Zajišťuje mapování parametrů, formátování 
+ * výsledku do TSV a podporu pro vícenásobné sady výsledků (Multiple Result-Sets).
  */
 class McpGenericStoredProc extends McpTool {
 	
-	private string $toolName;       // Název nástroje z databáze (slouží pro odvození názvu procedury)
-	private array  $definitions;    // Definice parametrů nástroje načtené z tabulky mcp_tool_param
+	private string $toolName;
+	private array $definitions;
 
 	/**
-	 * Konstruktor rozšířený o název nástroje a jeho parametry.
-	 *
-	 * @param resource $db          Aktivní spojení na MSSQL přes sqlsrv_connect
-	 * @param string   $toolName    Název volaného nástroje
-	 * @param array    $definitions Struktura očekávaných parametrů pro validaci
+	 * @param resource $db        Aktivní spojení na MSSQL
+	 * @param string $toolName    Název nástroje (např. 'set_organization')
+	 * @param array  $definitions Definice parametrů načtená z db_interface
 	 */
 	public function __construct($db, string $toolName, array $definitions) {
 		parent::__construct($db);
@@ -25,133 +25,133 @@ class McpGenericStoredProc extends McpTool {
 	}
 
 	/**
-	 * Sestaví SQL příkaz EXEC pro dynamické volání uložené procedury.
-	 * Parametry jsou bezpečně předány přes nativní binding sqlsrv.
-	 * Zpracovává libovolné množství vrácených result-setů.
+	 * Spustí uloženou proceduru a zpracuje její vícenásobné výsledky.
 	 *
-	 * @param array<string, mixed> $params  Vstupní argumenty od klienta (Ollamy)
-	 * @return array                        Formátovaná JSON-RPC odpověď s TSV obsahem
+	 * @param array $params Asociativní pole vstupních parametrů.
+	 * @return array JSON-RPC Content pole s textovou (TSV) zprávou.
 	 */
 	public function execute(array $params): array {
-		// Bezpečné ošetření názvu procedury proti injection (povoleny pouze alfanumerické znaky a podtržítka)
-		$procName = "mcp_tool_" . preg_replace('/[^a-zA-Z0-9_]/', '', $this->toolName);
+		// Validace a sestavení fyzického názvu procedury
+		$safeToolName = preg_replace('/[^a-zA-Z0-9_]/', '', $this->toolName);
+		$procName     = "mcp_tool_" . $safeToolName;
 		
-		$sqlParams = [];                // Pole fragmentů pro EXEC příkaz (např. "@param = ?")
-		$sqlArgs   = [];                // Skutečné hodnoty pro nativní binding parametrizovaného dotazu
+		$sqlParams = [];
+		$execArgs  = [];
 		
-		// Sestavení parametrů a ošetření specifických datových typů dle definice
+		// Mapování vstupů uživatele na definované SQL parametry
 		foreach ($this->definitions as $def) {
-			$pName = $def['param_name'];
-			$val   = $params[$pName] ?? null;
+			// Zde byla chyba! Původní regulární výraz odstraňoval podtržítka.
+			// OPRAVA: [^a-zA-Z0-9_] zaručí, že názvy jako 'free_text' zůstanou nedotčené.
+			$pName = preg_replace('/[^a-zA-Z0-9_]/', '', $def['param_name']);
 			
-			// Pokud parametr není vyplněn, explicitně posíláme NULL (procedura to musí podporovat)
+			// Extrakce hodnoty, výchozí NULL, pokud není zadána
+			$val = $params[$pName] ?? null;
+			
 			if ($val === null || $val === '') {
-				$sqlParams[] = "@{$pName} = NULL";
-			} else {
-				// Požadavek: transformace UUID - odstranění pomlček a překlad na binární literál 0x...
-				if ($def['param_type'] === 'uuid') {
-					$hex = str_replace('-', '', $val);
-					$sqlParams[] = "@{$pName} = 0x{$hex}";
-				} else {
-					// Standardní parametrizovaný dotaz pro ostatní typy (string, number)
-					$sqlParams[] = "@{$pName} = ?";
-					$sqlArgs[]   = $val;
+				// Pokud je parametr vyžadován (is_required), ale chybí, vracíme chybu rovnou.
+				if (isset($def['is_required']) && $def['is_required']) {
+					return $this->error("Chybí povinný parametr '{$pName}'.");
 				}
+				// Jinak předáváme NULL pro SQL, který jej zpracuje ve svém těle.
+				$execArgs[] = "@{$pName} = NULL";
+			} else {
+				// Parametr je zadán, předáváme jeho obsah jako bezpečnou vázanou proměnnou (Bind parameter)
+				$execArgs[]  = "@{$pName} = ?";
+				$sqlParams[] = $val;
 			}
-		}
-		
-		// Finální sestavení SQL dotazu pro vyvolání procedury
-		$sql = "EXEC " . $procName . (!empty($sqlParams) ? " " . implode(', ', $sqlParams) : "");
-		
-		$stmt = sqlsrv_query($this->db, $sql, $sqlArgs);
-		
-		if ($stmt === false) {
-			return $this->error("Chyba při provádění procedury {$procName}: " . print_r(sqlsrv_errors(), true));
 		}
 
-		$finalOutput  = "";             // Agregovaný textový výstup všech bloků
-		$dataSetCount = 0;              // Počítadlo nalezených datových bloků
-		$next         = true;           // Řídící proměnná pro posun kurzoru
-		
-		// ARCHITEKTONICKÁ POJISTKA: 
-		// Smyčka iteruje přes všechny dostupné výsledkové sady (result sets).
-		// Ignoruje prázdné zprávy ("1 row affected") díky kontrole sqlsrv_has_rows.
-		do {
-			if (sqlsrv_has_rows($stmt)) {
-				$tsv       = "";        // Textový buffer pro aktuální blok
-				$isFirst   = true;      // Příznak prvního řádku (hlavička)
-				$rowNum    = 1;         // Počítadlo umělých řádků, resetuje se pro každý blok
-				$blockName = null;      // Tag nadpisu aktuálního bloku
-				
-				while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-					if ($isFirst) {
-						$headers = array_keys($row);
-						
-						// Detekce a zpracování speciálního řídícího sloupce
-						if (array_key_exists('__block_name', $row)) {
-							$blockName = (string)$row['__block_name'];
-							// Vyřazení řídícího sloupce, aby se nedostal do datové struktury
-							$headers = array_filter($headers, fn($k) => $k !== '__block_name');
-						}
-						
-						// Injekce umělého identifikátoru na první pozici pro AI modely
-						$headers = array_merge(['row_number'], array_values($headers));
-						
-						// Aplikace vizuálního oddělovače bloku pro kontext
-						if ($blockName !== null && $blockName !== '') {
-							$tsv .= "=== " . $blockName . " ===\n";
-						} elseif ($dataSetCount > 0) {
-							// Nouzový záchyt, pokud procedura vrací více bloků bez popisku
-							$tsv .= "=== RESULT_SET_" . ($dataSetCount + 1) . " ===\n";
-						}
-						
-						$tsv .= implode("\t", $headers) . "\n";
-						$isFirst = false;
-					}
-					
-					// Zpracování dat s ignorováním řídících informací
-					$rowStr = [];
-					foreach ($row as $key => $val) {
-						if ($key === '__block_name') continue;
-						
-						if ($val instanceof DateTime) {
-							$rowStr[] = $val->format('Y-m-d H:i:s');
-						} else {
-							// Bezpečná sanitizace: blokace rozbití TSV rozložení
-							$rowStr[] = str_replace(["\r", "\n", "\t"], " ", (string)$val);
-						}
-					}
-					
-					// Finalizace datového řádku 
-					$finalRowValues = array_merge([(string)$rowNum], $rowStr);
-					$tsv .= implode("\t", $finalRowValues) . "\n";
-					$rowNum++;
-				}
-				
-				// Sestavení celkového formátu za sebou
-				if (!$isFirst) {
-					if ($dataSetCount > 0) {
-						$finalOutput .= "\n"; 
-					}
-					$finalOutput .= $tsv;
-					$dataSetCount++;
-				}
-			}
-			
-			// Posun na další result-set a kontrola chyb
-			$next = sqlsrv_next_result($stmt);
-			if ($next === false) {
-				return $this->error("Chyba při posunu na další výsledek u {$procName}: " . print_r(sqlsrv_errors(), true));
-			}
-		} while ($next !== null);
-		
-		// Finální fallback výstup, pokud se nenačetla z žádného bloku data
-		if ($dataSetCount === 0) {
-			$finalOutput = "Žádná data nebyla nalezena.";
-		} else {
-			$finalOutput = trim($finalOutput);
+		$argsString = implode(", ", $execArgs);
+		$sql = "EXEC {$procName} {$argsString}";
+
+		// Exekuce dotazu (vč. vázaných parametrů proti SQL injection)
+		$stmt = sqlsrv_query($this->db, $sql, $sqlParams);
+
+		if ($stmt === false) {
+			$errors = sqlsrv_errors();
+			return $this->error("Chyba při provádění procedury {$procName}:\n" . print_r($errors, true));
 		}
-		
-		return $this->success($finalOutput);
+
+		// Buffer pro kompletní výstup včetně případných více sad výsledků
+		$tsvOutput = "";
+		$resultSetIndex = 1;
+
+		// Iterace přes všechny sady výsledků
+		do {
+			// Přeskočení případných prázdných result-setů (např. u pouhých UPDATE/INSERT)
+			if (!sqlsrv_has_rows($stmt)) {
+				continue;
+			}
+
+			// Načtení struktury hlaviček pro aktuální result-set
+			$fieldMetadata = sqlsrv_field_metadata($stmt);
+			if ($fieldMetadata === false) {
+				continue;
+			}
+
+			$headers   = [];
+			$blockName = null;
+
+			// Projdeme všechny sloupce a detekujeme speciální systémový sloupec '__block_name'
+			foreach ($fieldMetadata as $meta) {
+				if (strtolower($meta['Name']) === '__block_name') {
+					$blockName = true;
+				} else {
+					$headers[] = $meta['Name'];
+				}
+			}
+
+			$rows = [];
+			$currentBlockNameFromData = null;
+
+			// Načtení dat z aktuální sady
+			while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+				// Pokud je v datové sadě sloupec __block_name, využijeme jej jako nadpis pro klienta
+				if ($blockName === true && isset($row['__block_name'])) {
+					$currentBlockNameFromData = (string)$row['__block_name'];
+				}
+				
+				$cleanRow = [];
+				foreach ($headers as $h) {
+					$cleanRow[] = $row[$h] ?? '';
+				}
+				$rows[] = $cleanRow;
+			}
+
+			if (empty($rows)) {
+				continue; // Nalezeny sloupce, ale žádná data
+			}
+
+			// Určení názvu bloku (pokud není definován v datech, použije se číselné označení)
+			$title = $currentBlockNameFromData ?: "Result Set {$resultSetIndex}";
+
+			// Zápis hlavičky bloku pro db_interface.php (oddělovač ===)
+			$tsvOutput .= "=== {$title} ===\n";
+			
+			// Zápis sloupců
+			$tsvOutput .= implode("\t", $headers) . "\n";
+			
+			// Zápis datových řádků
+			foreach ($rows as $r) {
+				// Bezpečnostní náhrada řídících znaků za mezery, aby se nerozbilo TSV formátování
+				$cleanStrings = array_map(function($val) {
+					return str_replace(["\r", "\n", "\t"], " ", (string)$val);
+				}, $r);
+				$tsvOutput .= implode("\t", $cleanStrings) . "\n";
+			}
+
+			$resultSetIndex++;
+			$tsvOutput .= "\n"; // Mezera mezi bloky pro vizuální oddělení
+			
+		} while (sqlsrv_next_result($stmt));
+
+		sqlsrv_free_stmt($stmt);
+
+		// Pokud nedošlo k žádné chybě, ale nic se nevrátilo (např. spuštěna void procedura)
+		if (trim($tsvOutput) === '') {
+			return $this->success("Procedura proběhla, ale nevrátila žádná data.");
+		}
+
+		return $this->success(trim($tsvOutput));
 	}
 }

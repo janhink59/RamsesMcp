@@ -23,9 +23,10 @@ delete from mcp_report
 -- =====================================================================
 -- 1. IMPORT NÁSTROJŮ (MCP TOOLS)
 -- =====================================================================
-insert into mcp_tool(mcp_tool,name,description,is_generic,more_results)
+insert into mcp_tool(mcp_tool,name,title,description,is_generic,more_results)
 select hashbytes('MD5',N'mcp_tool.'+t.name)
 	,t.name
+	,t.title
 	,t.description
 	,coalesce(t.is_generic,0)
 	,coalesce(t.more_results,0)

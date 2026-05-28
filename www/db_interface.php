@@ -33,7 +33,7 @@ class db_interface {
 	/** @var array<string, array<int, array{param_name: string, param_title: string, param_type: string, description: string, is_required: bool}>> $mcp_tool_params Definice parametrů. */
 	private array $mcp_tool_params = [];
 	
-	/** @var array<int, array<string, mixed>> $mcp_tool_data Buffer pro výsledná asociativní data z posledního spuštěného nástroje. */
+	/** @var array<int, array{block_name: string|null, rows: array<int, array<string, mixed>>}> $mcp_tool_data Buffer strukturovaných bloků (result-setů). */
 	private array $mcp_tool_data = [];
 	
 	/** @var string|null $last_error Poslední zachycená chybová zpráva (vhodné pro UI diagnostiku). */
@@ -262,7 +262,8 @@ class db_interface {
 	}
 
 	/**
-	 * Pomocná metoda pro parsování unifikovaného TSV výstupu zpět do strukturovaného pole.
+	 * Pomocná metoda pro parsování unifikovaného TSV výstupu zpět do strukturované podoby bloků.
+	 * ARCHITEKTONICKÁ ZMĚNA: Nyní plně podporuje více result-setů (bloků) oddělených tagem ===.
 	 *
 	 * @param string $tsvString Surový TSV řetězec z McpTool objektu.
 	 */
@@ -270,31 +271,63 @@ class db_interface {
 		$this->mcp_tool_data = [];
 		$lines = explode("\n", trim($tsvString));
 		
-		if (count($lines) > 0 && !str_contains($lines[0], "\t") && $lines[0] !== '') {
-			$firstLine = array_shift($lines);
-			if (str_starts_with($firstLine, 'Žádná data')) {
+		// Ošetření prázdných výstupů nebo chybových zpráv
+		if (count($lines) > 0 && !str_contains($lines[0], "\t") && !str_starts_with($lines[0], '===') && $lines[0] !== '') {
+			$firstLine = trim($lines[0]);
+			if (str_starts_with($firstLine, 'Žádná data') || str_starts_with($firstLine, 'Chyba')) {
 				return;
 			}
 		}
 
-		if (count($lines) >= 2) {
-			$headers = explode("\t", array_shift($lines));
-			foreach ($lines as $line) {
-				if ($line === '') continue;
+		$currentBlockName = null;
+		$currentHeaders   = null;
+		$currentRows      = [];
+
+		foreach ($lines as $line) {
+			$line = trim($line);
+			if ($line === '') continue;
+
+			// Detekce začátku nového bloku na základě tagů, které generuje McpGenericStoredProc
+			if (preg_match('/^===\s*(.+?)\s*===$/', $line, $matches)) {
+				// Pokud už máme načtený předchozí blok, uložíme jej
+				if ($currentHeaders !== null || !empty($currentRows)) {
+					$this->mcp_tool_data[] = [
+						'block_name' => $currentBlockName,
+						'rows'       => $currentRows
+					];
+				}
+				$currentBlockName = $matches[1];
+				$currentHeaders   = null;
+				$currentRows      = [];
+				continue;
+			}
+
+			if ($currentHeaders === null) {
+				// První řádek dat po hlavičce (nebo na úplném začátku) jsou sloupce
+				$currentHeaders = explode("\t", $line);
+			} else {
+				// Další řádky jsou samotná data
 				$values = explode("\t", $line);
 				$row = [];
-				foreach ($headers as $index => $header) {
+				foreach ($currentHeaders as $index => $header) {
 					$row[$header] = $values[$index] ?? '';
 				}
-				$this->mcp_tool_data[] = $row;
+				$currentRows[] = $row;
 			}
+		}
+
+		// Uložení posledního otevřeného bloku po dojetí smyčky
+		if ($currentHeaders !== null || !empty($currentRows)) {
+			$this->mcp_tool_data[] = [
+				'block_name' => $currentBlockName,
+				'rows'       => $currentRows
+			];
 		}
 	}
 
 	/**
 	 * Pomocná metoda pro plnění kontextu a zachycení stavu nástroje (Claim Check pattern).
-	 * Nyní BEZ OHLEDU na přítomnost parametru save_as plní pevnou proměnnou row_{tool_name}
-	 * s indexem nastaveným na hodnotu z injected sloupce row_number.
+	 * Nyní bezpečně iteruje přes strukturu s vícero bloky (result-sety).
 	 *
 	 * @param string $tool_name Název aktuálně exekuovaného MCP nástroje.
 	 * @param mixed  $saveAs    Hodnota volitelného parametru (string nebo null).
@@ -345,51 +378,54 @@ class db_interface {
 		$rowIndex = 0;
 		$sqlInsert = "INSERT INTO mcp_saved_values (wwwsession, save_as, row_index, saved_data) VALUES (?, ?, ?, ?)";
 
-		// 3. KROK: Sekvenční procházení dat a zápis do relačních struktur
+		// 3. KROK: Sekvenční procházení dat všech bloků a zápis do relačních struktur
 		if (!empty($this->mcp_tool_data)) {
-			foreach ($this->mcp_tool_data as $row) {
-				
-				// Extrakce skutečného primárního klíče (první sloupec za injected row_number)
-				$valToSave = null;
-				foreach ($row as $key => $val) {
-					if ($key !== 'row_number') {
-						$valToSave = $val;
-						break;
+			foreach ($this->mcp_tool_data as $block) {
+				foreach ($block['rows'] as $row) {
+					
+					// Extrakce skutečného primárního klíče (první sloupec za injected row_number)
+					$valToSave = null;
+					foreach ($row as $key => $val) {
+						if ($key !== 'row_number') {
+							$valToSave = $val;
+							break;
+						}
 					}
-				}
-				
-				if ($valToSave === null) {
-					$valToSave = reset($row);
-				}
-				
-				$strVal = ($valToSave === null) ? null : (string)$valToSave;
-				
-				if ($strVal !== null && mb_strlen($strVal) > 200) {
-					$strVal = mb_substr($strVal, 0, 200);
-				}
+					
+					if ($valToSave === null) {
+						$valToSave = reset($row);
+					}
+					
+					$strVal = ($valToSave === null) ? null : (string)$valToSave;
+					
+					if ($strVal !== null && mb_strlen($strVal) > 200) {
+						$strVal = mb_substr($strVal, 0, 200);
+					}
 
-				// Extrakce row_number pro index automatické proměnné (fallback na inkrementaci)
-				$rowNumberVal = isset($row['row_number']) ? (int)$row['row_number'] : ($rowIndex + 1);
+					// ZÁSADNÍ ZMĚNA: Ignorujeme 'row_number' z dat (může se resetovat při novém result-setu)
+					// a využíváme náš striktně globální $rowIndex, abychom neporušili unikátní klíč DB
+					$autoIndex = $rowIndex + 1;
 
-				// A) Zápis do automatické proměnné row_{tool_name} (index odpovídá přímo číslu řádku pro uživatele)
-				$stmtInsertAuto = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $autoVarName, $rowNumberVal, $strVal]);
-				if ($stmtInsertAuto === false) {
-					$this->last_error = "Chyba při zápisu do automatické proměnné na indexu {$rowNumberVal}:\n" . print_r(sqlsrv_errors(), true);
-					return false;
-				}
-				sqlsrv_free_stmt($stmtInsertAuto);
-
-				// B) Zápis do volitelné proměnné save_as (pokud byla LLM vyžádána - standardní indexování od 0)
-				if ($saveAs !== null) {
-					$stmtInsertSaveAs = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $saveAs, $rowIndex, $strVal]);
-					if ($stmtInsertSaveAs === false) {
-						$this->last_error = "Chyba při zápisu do explicitní proměnné save_as na indexu {$rowIndex}:\n" . print_r(sqlsrv_errors(), true);
+					// A) Zápis do automatické proměnné row_{tool_name} (index odpovídá globálnímu číslu řádku)
+					$stmtInsertAuto = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $autoVarName, $autoIndex, $strVal]);
+					if ($stmtInsertAuto === false) {
+						$this->last_error = "Chyba při zápisu do automatické proměnné na indexu {$autoIndex}:\n" . print_r(sqlsrv_errors(), true);
 						return false;
 					}
-					sqlsrv_free_stmt($stmtInsertSaveAs);
-				}
+					sqlsrv_free_stmt($stmtInsertAuto);
 
-				$rowIndex++;
+					// B) Zápis do volitelné proměnné save_as (pokud byla LLM vyžádána - standardní indexování od 0)
+					if ($saveAs !== null) {
+						$stmtInsertSaveAs = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $saveAs, $rowIndex, $strVal]);
+						if ($stmtInsertSaveAs === false) {
+							$this->last_error = "Chyba při zápisu do explicitní proměnné save_as na indexu {$rowIndex}:\n" . print_r(sqlsrv_errors(), true);
+							return false;
+						}
+						sqlsrv_free_stmt($stmtInsertSaveAs);
+					}
+
+					$rowIndex++;
+				}
 			}
 		}
 
@@ -398,18 +434,23 @@ class db_interface {
 			// Pokud bylo save_as vyplněno, LLM dostane pouze zprávu o úspěšném uložení dat (Claim-Check pattern)
 			$this->mcp_tool_data = [
 				[
-					'rows' => $rowIndex,
-					'msg'  => "Data uložena jako '{$saveAs}'"
+					'block_name' => 'System',
+					'rows'       => [
+						[
+							'rows' => $rowIndex,
+							'msg'  => "Data uložena jako '{$saveAs}'"
+						]
+					]
 				]
 			];
 		}
-		// Pokud save_as vyplněno nebylo, $this->mcp_tool_data se nemění, letí v plném znění s row_number přímo do chatu k modelu.
+		// Pokud save_as vyplněno nebylo, $this->mcp_tool_data se nemění.
 
 		return true;
 	}
 
 	/**
-	 * Formátuje buffer mcp_tool_data jako HTML tabulku pro zobrazení v testovacím UI.
+	 * Formátuje buffer mcp_tool_data (nyní vícero bloků) jako HTML tabulky pro zobrazení v testovacím UI.
 	 *
 	 * @return string HTML reprezentace výsledku
 	 */
@@ -421,26 +462,39 @@ class db_interface {
 			return "<div class='warning' style='padding: 10px;'>Žádná data nebyla nalezena.</div>";
 		}
 
-		$html  = "<table class='response-table' style='width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff;'>\n";
-		$html .= "\t<thead>\n\t\t<tr style='background: #f8f9fa;'>\n";
-		foreach (array_keys($this->mcp_tool_data[0]) as $colName) {
-			$html .= "\t\t\t<th style='padding: 10px; border: 1px solid #e2e8f0; text-align: left;'>" . htmlspecialchars((string)$colName) . "</th>\n";
-		}
-		$html .= "\t\t</tr>\n\t</thead>\n\t<tbody>\n";
-		foreach ($this->mcp_tool_data as $row) {
-			$html .= "\t\t<tr>\n";
-			foreach ($row as $val) {
-				$html .= "\t\t\t<td style='padding: 10px; border: 1px solid #e2e8f0;'>" . htmlspecialchars((string)$val) . "</td>\n";
+		$html = "";
+		foreach ($this->mcp_tool_data as $block) {
+			// Zobrazení názvu bloku, pokud existuje (např. oddělení více result-setů)
+			if (!empty($block['block_name'])) {
+				$html .= "<h4 style='margin-top: 15px; margin-bottom: 5px; color: #2d3748; border-bottom: 1px solid #edf2f7; padding-bottom: 4px;'>" . htmlspecialchars($block['block_name']) . "</h4>\n";
 			}
-			$html .= "\t\t</tr>\n";
+
+			if (empty($block['rows'])) {
+				$html .= "<div class='warning' style='padding: 10px; color: #718096;'>Žádné řádky v tomto bloku.</div>\n";
+				continue;
+			}
+
+			$html .= "<table class='response-table' style='width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff;'>\n";
+			$html .= "\t<thead>\n\t\t<tr style='background: #f8f9fa;'>\n";
+			foreach (array_keys($block['rows'][0]) as $colName) {
+				$html .= "\t\t\t<th style='padding: 10px; border: 1px solid #e2e8f0; text-align: left;'>" . htmlspecialchars((string)$colName) . "</th>\n";
+			}
+			$html .= "\t\t</tr>\n\t</thead>\n\t<tbody>\n";
+			foreach ($block['rows'] as $row) {
+				$html .= "\t\t<tr>\n";
+				foreach ($row as $val) {
+					$html .= "\t\t\t<td style='padding: 10px; border: 1px solid #e2e8f0;'>" . htmlspecialchars((string)$val) . "</td>\n";
+				}
+				$html .= "\t\t</tr>\n";
+			}
+			$html .= "\t</tbody>\n</table>\n";
 		}
-		$html .= "\t</tbody>\n</table>";
 
 		return $html;
 	}
 
 	/**
-	 * Formátuje buffer mcp_tool_data do TSV pro odeslání zpět MCP AI klientovi.
+	 * Formátuje vícero bloků z bufferu mcp_tool_data zpět do TSV pro odeslání MCP AI klientovi.
 	 *
 	 * @return array JSON-RPC Content pole s textovou zprávou
 	 */
@@ -457,18 +511,29 @@ class db_interface {
 			];
 		}
 
-		$tsv = implode("\t", array_keys($this->mcp_tool_data[0])) . "\n";
+		$tsv = "";
 		
-		foreach ($this->mcp_tool_data as $row) {
-			$rowStr = array_map(function($val) {
-				return str_replace(["\r", "\n", "\t"], " ", (string)$val);
-			}, $row);
-			
-			$tsv .= implode("\t", $rowStr) . "\n";
+		foreach ($this->mcp_tool_data as $block) {
+			// Vrácení hlaviček bloků pro orientaci LLM
+			if (!empty($block['block_name'])) {
+				$tsv .= "=== " . $block['block_name'] . " ===\n";
+			}
+
+			if (!empty($block['rows'])) {
+				$tsv .= implode("\t", array_keys($block['rows'][0])) . "\n";
+				
+				foreach ($block['rows'] as $row) {
+					$rowStr = array_map(function($val) {
+						return str_replace(["\r", "\n", "\t"], " ", (string)$val);
+					}, $row);
+					
+					$tsv .= implode("\t", $rowStr) . "\n";
+				}
+			}
 		}
 
 		return [
-			"content" => [["type" => "text", "text" => "Nalezena data:\n" . $tsv]]
+			"content" => [["type" => "text", "text" => "Nalezena data:\n" . trim($tsv)]]
 		];
 	}
 
