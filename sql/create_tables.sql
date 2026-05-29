@@ -64,3 +64,15 @@ CREATE TABLE mcp_scenario (
     when_not_to_use NVARCHAR(500) NULL,
     instructions NVARCHAR(MAX) NOT NULL
 );
+GO
+IF OBJECT_ID('mcp_filter', 'U') is null
+/*
+	Tabulka mcp_filter
+	Slouží jako číselník a metadata pro chytré filtry (Smart Tools).
+	Data se plní primárně importem z Excelu (list mcp_filter).
+*/
+CREATE TABLE mcp_filter (
+	filter_code				VARCHAR(100) NOT NULL PRIMARY KEY,	-- Unikátní identifikátor filtru (např. 'asset_class')
+	free_text_description	NVARCHAR(MAX) NULL					-- Instrukce/popis pro LLM, co má uživatel zadat
+);
+GO

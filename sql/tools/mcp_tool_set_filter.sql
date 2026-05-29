@@ -1,0 +1,58 @@
+execute dropni 'mcp_tool_set_filter'
+GO
+
+/*
+	Nástroj: set_filter (Generický MCP Tool - Dispeèer / Fasáda)
+	Úèel:    Pøijímá požadavek od LLM, ošetøí vstupy a dynamicky volá 
+	         specifické implementace filtrù (napø. mcp_filter_asset_class).
+	Výstup:  Vrací jednosloupcové TSV (sloupec "result") s textovou zprávou
+	         o úspìchu, nebo chybové hlášení (aby nedošlo k pádu LLM agenta).
+*/
+CREATE PROCEDURE mcp_tool_set_filter
+	@filter_code	VARCHAR(100),           -- Kód filtru z tabulky mcp_filter
+	@free_text		NVARCHAR(MAX) = NULL,   -- Hledaný text (nepovinný, záleží na logice konkrétního filtru)
+	@save_as		VARCHAR(100) = NULL     -- Sjednocený název klíèe do kontextu (fallback na @filter_code)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	-- 1. Oèištìní a pøíprava parametrù
+	SET @filter_code = LTRIM(RTRIM(@filter_code));
+	SET @free_text = LTRIM(RTRIM(ISNULL(@free_text, '')));
+
+	-- Pokud LLM (nebo uživatel) nepøedá save_as, použijeme jako klíè samotný filter_code
+	IF NULLIF(LTRIM(RTRIM(@save_as)), '') IS NULL
+	BEGIN
+		SET @save_as = @filter_code;
+	END
+
+	-- 2. Základní validace
+	IF @filter_code = '' OR @filter_code IS NULL
+	BEGIN
+		SELECT 'CHYBA: Parametr filter_code je povinný a nebyl pøedán.' AS result;
+		RETURN;
+	END
+
+	-- 3. Sestavení názvu cílové uložené procedury
+	DECLARE @proc_name NVARCHAR(128) = N'dbo.mcp_filter_' + @filter_code;
+
+	-- 4. BEZPEÈNOSTNÍ KONTROLA (Prevence SQL Injection)
+	IF OBJECT_ID(@proc_name, 'P') IS NULL
+	BEGIN
+		SELECT 'CHYBA: Filtr s kódem ''' + @filter_code + ''' aktuálnì není na serveru implementován.' AS result;
+		RETURN;
+	END
+
+	-- 5. Dynamické spuštìní konkrétní procedury filtru
+	BEGIN TRY
+		-- ZDE Byla chyba: Dispeèer døíve pøedával @variable_name
+		-- Nyní správnì pøedáváme parametr @save_as
+		EXEC @proc_name 
+			@free_text = @free_text, 
+			@save_as = @save_as;
+	END TRY
+	BEGIN CATCH
+		SELECT 'CHYBA DATABÁZE PØI VÝPOÈTU FILTRU: ' + ERROR_MESSAGE() AS result;
+	END CATCH
+END
+GO

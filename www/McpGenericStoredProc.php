@@ -57,7 +57,14 @@ class McpGenericStoredProc extends McpTool {
 			} else {
 				// Parametr je zadán, předáváme jeho obsah jako bezpečnou vázanou proměnnou (Bind parameter)
 				$execArgs[]  = "@{$pName} = ?";
-				$sqlParams[] = $val;
+				
+				// OPRAVA IMSSP -40: Explicitně ovladači říkáme, že $val je UTF-8 řetězec,
+				// bez ohledu na to, jaké je výchozí kódování spojení nebo OS.
+				$sqlParams[] = [
+					$val, 
+					SQLSRV_PARAM_IN, 
+					SQLSRV_PHPTYPE_STRING('UTF-8')
+				];
 			}
 		}
 
@@ -69,7 +76,13 @@ class McpGenericStoredProc extends McpTool {
 
 		if ($stmt === false) {
 			$errors = sqlsrv_errors();
-			return $this->error("Chyba při provádění procedury {$procName}:\n" . print_r($errors, true));
+			$errorString = print_r($errors, true);
+			
+			// OPRAVA KÓDOVÁNÍ: sqlsrv_errors vrací na českých Windows chybové zprávy v CP1250.
+			// Pro úspěšný json_encode je musíme natvrdo převést do UTF-8.
+			$errorStringUtf8 = mb_convert_encoding($errorString, 'UTF-8', 'Windows-1250');
+			
+			return $this->error("Chyba při provádění procedury {$procName}:\n" . $errorStringUtf8);
 		}
 
 		// Buffer pro kompletní výstup včetně případných více sad výsledků
