@@ -29,6 +29,9 @@ BEGIN
 		RETURN;
 	END
 
+	DELETE FROM mcp_saved_values 
+	WHERE wwwsession = @wwwsession AND save_as = @save_as;
+	
 	-- 2. Ošetření vstupu
 	IF ISNULL(@free_text, '') = ''
 	BEGIN
@@ -96,8 +99,6 @@ BEGIN
 		END
 
 		-- 6. Uložení nalezených ID do kontextu (SPRÁVNÉ NÁZVY SLOUPCŮ)
-		DELETE FROM mcp_saved_values 
-		WHERE wwwsession = @wwwsession AND save_as = @save_as;
 		
 		INSERT INTO mcp_saved_values (wwwsession, save_as, row_index, saved_data)
 		SELECT 

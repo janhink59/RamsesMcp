@@ -1,6 +1,6 @@
 CREATE OR ALTER PROCEDURE [dbo].[mcp_tool_find_system_workflow]
 	@keywords NVARCHAR(1000)
-	,@top int=3
+	,@top_n int=3
 AS
 /*
 =========================================================================================
@@ -48,7 +48,7 @@ BEGIN
 	FROM 
 		[dbo].[mcp_scenario] m
 	INNER JOIN 
-		FREETEXTTABLE([dbo].[mcp_scenario], (title, intent, keywords), @keywords, @top) ft
+		FREETEXTTABLE([dbo].[mcp_scenario], (title, intent, keywords), @keywords, @top_n) ft
 			ON ft.[KEY] = m.scenario_code
 	ORDER BY 
 		ft.RANK DESC;
