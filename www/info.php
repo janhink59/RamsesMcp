@@ -29,7 +29,7 @@ require_once __DIR__ . '/db_connect.php';
 try {
 	// Ochrana proti přímému spuštění mimo router
 	if (!isset($config)) {
-		throw new Exception("Kritická chyba: Globální konfigurace \$config nebyla nalezena. info.php musí být voláno přes index.php.");
+		throw new Exception("Kritická chyba: Globální konfigurace \$config nebyla nalezena. info.php must be called via index.php.");
 	}
 
 	$dbi = new db_interface();
@@ -90,7 +90,46 @@ try {
 		button:hover { background: #2b6cb0; }
 		button.btn-test { background: #38a169; }
 		button.btn-template { background: #d69e2e; color: #fff; }
-		.code-template { background: #1a202c; color: #e2e8f0; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Cascadia Code', monospace; font-size: 0.9rem; tab-size: 4; }
+		
+		.code-template { 
+			background: #1a202c; 
+			color: #e2e8f0; 
+			padding: 15px; 
+			border-radius: 8px; 
+			overflow-x: auto; 
+			font-family: "Cascadia Code", monospace; 
+			font-size: 0.85rem; 
+			tab-size: 4; 
+			margin-bottom: 0; 
+			white-space: pre-wrap; 
+			word-wrap: break-word; 
+			max-width: 100%; 
+			box-sizing: border-box; 
+		}
+		.template-container { 
+			position: relative; 
+			max-width: 100%; 
+			margin-top: 10px; 
+		}
+		.btn-copy { 
+			position: absolute; 
+			top: 10px; 
+			right: 10px; 
+			background: #4a5568; 
+			color: #fff; 
+			border: 1px solid #718096; 
+			padding: 5px 12px; 
+			border-radius: 6px; 
+			font-size: 0.85rem; 
+			cursor: pointer; 
+			transition: all 0.2s ease; 
+			opacity: 0.9; 
+		}
+		.btn-copy:hover { 
+			background: #2d3748; 
+			opacity: 1; 
+			box-shadow: 0 2px 4px rgba(0,0,0,0.2); 
+		}
 	</style>
 </head>
 <body>
@@ -177,99 +216,102 @@ try {
 									</div>
 								<?php else: ?>
 									<h3 style="color: #b7791f;">Šablona pro: <?php echo htmlspecialchars($implStatus['target']); ?></h3>
-									<pre class='code-template'><code><?php 
-										if ($tool['is_generic']) {
-											// Vyhodnocení názvu: prioritně title z DB, fallback na system name, jinak fyzický cíl
-											$toolTitle = !empty($tool['title']) ? $tool['title'] : (!empty($tName) ? $tName : $implStatus['target']);
-											
-											$sqlTemplate  = "/*\n";
-											$sqlTemplate .= "\tNástroj: " . $toolTitle . "\n";
-											
-											// Formátování popisu do víceřádkového komentáře, pokud existuje
-											if (isset($tool['description']) && trim((string)$tool['description']) !== '') {
-												$descLines = explode("\n", $tool['description']);
-												$sqlTemplate .= "\tPopis:   " . array_shift($descLines) . "\n";
-												foreach ($descLines as $line) {
-													$sqlTemplate .= "\t         " . trim($line) . "\n";
-												}
-											}
-											
-											$sqlTemplate .= "*/\n";
-											$sqlTemplate .= "CREATE OR ALTER PROCEDURE " . $implStatus['target'] . "\n";
-											
-											// Generování deklarace parametrů s typováním a zarovnanými komentáři včetně titulků
-											if (!empty($params[$tName])) {
-												$validParams = array_values(array_filter($params[$tName], fn($p) => $p['param_name'] !== 'save_as'));
+									<div class="template-container">
+										<button type="button" class="btn-copy" onclick="copyTemplate(this, 'template_<?php echo $safeName; ?>')">📋 Kopírovat</button>
+										<pre class='code-template' id='template_<?php echo $safeName; ?>'><code><?php 
+											if ($tool['is_generic']) {
+												// Vyhodnocení názvu: prioritně title z DB, fallback na system name, jinak fyzický cíl
+												$toolTitle = !empty($tool['title']) ? $tool['title'] : (!empty($tName) ? $tName : $implStatus['target']);
 												
-												if (!empty($validParams)) {
-													$maxDeclLen = 0;
-													$parsedParams = [];
-													
-													foreach ($validParams as $p) {
-														$sqlType = 'NVARCHAR(MAX)';                     // Výchozí fallback
-														$pType = strtolower((string)$p['param_type']);
-														
-														if ($pType === 'uuid' || $pType === 'guid') {
-															$sqlType = 'UNIQUEIDENTIFIER';
-														} elseif ($pType === 'number' || $pType === 'int') {
-															$sqlType = 'INT';
-														} elseif ($pType === 'bit') {
-															$sqlType = 'BIT';
-														}
-														
-														$decl = "@" . $p['param_name'] . " " . $sqlType;
-														if (strlen($decl) > $maxDeclLen) {
-															$maxDeclLen = strlen($decl);
-														}
-														
-														$parsedParams[] = [
-															'decl'  => $decl,
-															'req'   => $p['is_required'] ? 'Povinný' : 'Volitelný',
-															'title' => trim((string)($p['param_title'] ?? '')),
-															'desc'  => trim(str_replace(["\r", "\n", "\t"], " ", (string)($p['description'] ?? '')))
-														];
+												$sqlTemplate  = "/*\n";
+												$sqlTemplate .= "\tNástroj: " . $toolTitle . "\n";
+												
+												// Formátování popisu do víceřádkového komentáře, pokud existuje
+												if (isset($tool['description']) && trim((string)$tool['description']) !== '') {
+													$descLines = explode("\n", $tool['description']);
+													$sqlTemplate .= "\tPopis:   " . array_shift($descLines) . "\n";
+													foreach ($descLines as $line) {
+														$sqlTemplate .= "\t         " . trim($line) . "\n";
 													}
-													
-													$paramLines = [];
-													$total = count($parsedParams);
-													foreach ($parsedParams as $i => $pp) {
-														$comma = ($i < $total - 1) ? "," : "";
-														$padDecl = str_pad($pp['decl'] . $comma, $maxDeclLen + 1, " ");
-														
-														$comment = "-- [" . $pp['req'] . "]";
-														if ($pp['title'] !== '') {
-															$comment .= " " . $pp['title'];
-															if ($pp['desc'] !== '') $comment .= " -";
-														}
-														if ($pp['desc'] !== '') {
-															$comment .= " " . $pp['desc'];
-														}
-														
-														$paramLines[] = "\t" . $padDecl . " " . $comment;
-													}
-													$sqlTemplate .= implode("\n", $paramLines) . "\n";
 												}
+												
+												$sqlTemplate .= "*/\n";
+												$sqlTemplate .= "CREATE OR ALTER PROCEDURE " . $implStatus['target'] . "\n";
+												
+												// Generování deklarace parametrů s typováním a zarovnanými komentáři včetně titulků
+												if (!empty($params[$tName])) {
+													$validParams = array_values(array_filter($params[$tName], fn($p) => $p['param_name'] !== 'save_as'));
+													
+													if (!empty($validParams)) {
+														$maxDeclLen = 0;
+														$parsedParams = [];
+														
+														foreach ($validParams as $p) {
+															$sqlType = 'NVARCHAR(MAX)';                     // Výchozí fallback
+															$pType = strtolower((string)$p['param_type']);
+															
+															if ($pType === 'uuid' || $pType === 'guid') {
+																$sqlType = 'UNIQUEIDENTIFIER';
+															} elseif ($pType === 'number' || $pType === 'int') {
+																$sqlType = 'INT';
+															} elseif ($pType === 'bit') {
+																$sqlType = 'BIT';
+															}
+															
+															$decl = "@" . $p['param_name'] . " " . $sqlType;
+															if (strlen($decl) > $maxDeclLen) {
+																$maxDeclLen = strlen($decl);
+															}
+															
+															$parsedParams[] = [
+																'decl'  => $decl,
+																'req'   => $p['is_required'] ? 'Povinný' : 'Volitelný',
+																'title' => trim((string)($p['param_title'] ?? '')),
+																'desc'  => trim(str_replace(["\r", "\n", "\t"], " ", (string)($p['description'] ?? '')))
+															];
+														}
+														
+														$paramLines = [];
+														$total = count($parsedParams);
+														foreach ($parsedParams as $i => $pp) {
+															$comma = ($i < $total - 1) ? "," : "";
+															$padDecl = str_pad($pp['decl'] . $comma, $maxDeclLen + 1, " ");
+															
+															$comment = "-- [" . $pp['req'] . "]";
+															if ($pp['title'] !== '') {
+																$comment .= " " . $pp['title'];
+																if ($pp['desc'] !== '') $comment .= " -";
+															}
+															if ($pp['desc'] !== '') {
+																$comment .= " " . $pp['desc'];
+															}
+															
+															$paramLines[] = "\t" . $padDecl . " " . $comment;
+														}
+														$sqlTemplate .= implode("\n", $paramLines) . "\n";
+													}
+												}
+												
+												$sqlTemplate .= "AS\n";
+												$sqlTemplate .= "BEGIN\n";
+												$sqlTemplate .= "\tSET NOCOUNT ON;\n";
+												$sqlTemplate .= "\t\n";
+												$sqlTemplate .= "\t-- TODO: Zde implementujte logiku nástroje pro AI\n";
+												$sqlTemplate .= "\t\n";
+												$sqlTemplate .= "\t-- Příklad pro vracení více datových sad (Multi Result-Sets):\n";
+												$sqlTemplate .= "\t-- SELECT 'Základní info' AS __block_name, 'Hodnota' AS Sloupec1;\n";
+												$sqlTemplate .= "\t-- SELECT 'Detailní data' AS __block_name, 'Hodnota' AS Sloupec1;\n";
+												$sqlTemplate .= "\t\n";
+												$sqlTemplate .= "\tSELECT 'Not implemented' AS Status;\n";
+												$sqlTemplate .= "END\n";
+												$sqlTemplate .= "GO";
+												
+												echo htmlspecialchars($sqlTemplate);
+											} else {
+												echo htmlspecialchars("<?php\nclass " . str_replace('.php', '', $implStatus['target']) . " extends McpTool {\n\tpublic function execute(array \$params): array {\n\t\treturn \$this->success(\"Nástroj zatím není implementován.\");\n\t}\n}");
 											}
-											
-											$sqlTemplate .= "AS\n";
-											$sqlTemplate .= "BEGIN\n";
-											$sqlTemplate .= "\tSET NOCOUNT ON;\n";
-											$sqlTemplate .= "\t\n";
-											$sqlTemplate .= "\t-- TODO: Zde implementujte logiku nástroje pro AI\n";
-											$sqlTemplate .= "\t\n";
-											$sqlTemplate .= "\t-- Příklad pro vracení více datových sad (Multi Result-Sets):\n";
-											$sqlTemplate .= "\t-- SELECT 'Základní info' AS __block_name, 'Hodnota' AS Sloupec1;\n";
-											$sqlTemplate .= "\t-- SELECT 'Detailní data' AS __block_name, 'Hodnota' AS Sloupec1;\n";
-											$sqlTemplate .= "\t\n";
-											$sqlTemplate .= "\tSELECT 'Not implemented' AS Status;\n";
-											$sqlTemplate .= "END\n";
-											$sqlTemplate .= "GO";
-											
-											echo htmlspecialchars($sqlTemplate);
-										} else {
-											echo htmlspecialchars("<?php\nclass " . str_replace('.php', '', $implStatus['target']) . " extends McpTool {\n\tpublic function execute(array \$params): array {\n\t\treturn \$this->success(\"Nástroj zatím není implementován.\");\n\t}\n}");
-										}
-									?></code></pre>
+										?></code></pre>
+									</div>
 								<?php endif; ?>
 							</div>
 						</td>
@@ -301,6 +343,27 @@ try {
 			} catch (e) {
 				resDiv.innerHTML = '<div class="error">Chyba AJAX požadavku: ' + e.message + '</div>';
 			}
+		}
+
+		function copyTemplate(btn, id) {
+			const pre = document.getElementById(id);
+			if (!pre) return;
+
+			navigator.clipboard.writeText(pre.textContent).then(() => {
+				const originalText = btn.innerHTML;
+				const originalBg = btn.style.background;
+
+				btn.innerHTML = '✅ Zkopírováno!';
+				btn.style.background = '#38a169';
+
+				setTimeout(() => {
+					btn.innerHTML = originalText;
+					btn.style.background = originalBg || '';
+				}, 2000);
+			}).catch(err => {
+				console.error('Kopírování selhalo: ', err);
+				alert('Nepodařilo se zkopírovat text do schránky.');
+			});
 		}
 	</script>
 </body>

@@ -11,7 +11,8 @@ GO
 */
 CREATE PROCEDURE mcp_filter_asset_class
 	@free_text NVARCHAR(MAX),
-	@save_as   VARCHAR(40)
+	@save_as   VARCHAR(40),
+	@top_n int=10
 AS
 BEGIN
 	SET NOCOUNT ON;
