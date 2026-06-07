@@ -1,8 +1,8 @@
-/*
-	Nástroj: set_organization
-	Název:   Nastavení kontextu organizace
-	Popis:   Pouije se v pøípadì, e se uivatel chce pøihlásit k jiné organizaci.
-	         Zpracovává volnı text pomocí hybridní heuristiky a vrací více sad vısledkù.
+ï»¿/*
+	NÃ¡stroj: set_organization
+	NÃ¡zev:   NastavenÃ­ kontextu organizace
+	Popis:   PouÅ¾ije se v pÅ™Ã­padÄ›, Å¾e se uÅ¾ivatel chce pÅ™ihlÃ¡sit k jinÃ© organizaci.
+	         ZpracovÃ¡vÃ¡ volnÃ½ text pomocÃ­ hybridnÃ­ heuristiky a vracÃ­ vÃ­ce sad vÃ½sledkÅ¯.
 */
 CREATE OR ALTER PROCEDURE mcp_tool_set_organization
 	@free_text NVARCHAR(MAX) = NULL
@@ -10,7 +10,7 @@ AS
 BEGIN
 	SET NOCOUNT ON;
 
-	-- 1. Zjištìní aktuálního uivatele z dbsession
+	-- 1. ZjiÅ¡tÄ›nÃ­ aktuÃ¡lnÃ­ho uÅ¾ivatele z dbsession
 	DECLARE @ramses_user BIGINT, @is_sysadmin BIT;
 	SELECT @ramses_user = ramses_user, @is_sysadmin = right_sysadmin
 	FROM dbsession
@@ -18,18 +18,18 @@ BEGIN
 
 	IF @ramses_user IS NULL
 	BEGIN
-		SELECT 'Status' AS __block_name, 'Chyba' AS Status, 'Nelze identifikovat pøihlášeného uivatele pro aktuální SPID.' AS Message;
+		SELECT 'Status' AS __block_name, 'Chyba' AS Status, 'Nelze identifikovat pÅ™ihlÃ¡Å¡enÃ©ho uÅ¾ivatele pro aktuÃ¡lnÃ­ SPID.' AS Message;
 		RETURN;
 	END
 
 	SET @free_text = TRIM(ISNULL(@free_text, ''));
 	IF LEN(@free_text) = 0
 	BEGIN
-		SELECT 'Status' AS __block_name, 'Chyba' AS Status, 'Nebyl zadán ádnı text pro vyhledání.' AS Message;
+		SELECT 'Status' AS __block_name, 'Chyba' AS Status, 'Nebyl zadÃ¡n Å¾Ã¡dnÃ½ text pro vyhledÃ¡nÃ­.' AS Message;
 		RETURN;
 	END
 
-	-- 2. Naètení skóre pomocí vylepšené funkce f_fuzzy_match
+	-- 2. NaÄtenÃ­ skÃ³re pomocÃ­ vylepÅ¡enÃ© funkce f_fuzzy_match
 	DECLARE @Candidates TABLE (
 		org_id BIGINT,
 		org_name NVARCHAR(255),
@@ -50,7 +50,7 @@ BEGIN
 	LEFT JOIN org_user ou ON ou.organization = o.organization AND ou.ramses_user = @ramses_user AND ou.disabled = 0
 	WHERE (@is_sysadmin = 1 OR ou.ramses_user IS NOT NULL);
 
-	-- 3. Vyèištìní balastu (skóre < 0.15 znamená, e to vùbec nesedí)
+	-- 3. VyÄiÅ¡tÄ›nÃ­ balastu (skÃ³re < 0.15 znamenÃ¡, Å¾e to vÅ¯bec nesedÃ­)
 	DELETE FROM @Candidates WHERE match_score < 0.15;
 
 	DECLARE @match_count INT;
@@ -58,18 +58,18 @@ BEGIN
 
 	IF @match_count = 0
 	BEGIN
-		SELECT 'Status' AS __block_name, 'Nenalezeno' AS Status, 'Organizace nebyla nalezena, nebo k ní nemáte pøístup.' AS Message;
+		SELECT 'Status' AS __block_name, 'Nenalezeno' AS Status, 'Organizace nebyla nalezena, nebo k nÃ­ nemÃ¡te pÅ™Ã­stup.' AS Message;
 		RETURN;
 	END
 
-	-- 4. Vıbìr pouze organizací se sdílenım nejlepším skóre
+	-- 4. VÃ½bÄ›r pouze organizacÃ­ se sdÃ­lenÃ½m nejlepÅ¡Ã­m skÃ³re
 	DECLARE @best_score FLOAT;
 	SELECT @best_score = MAX(match_score) FROM @Candidates;
 	
 	DELETE FROM @Candidates WHERE match_score < @best_score;
 	SELECT @match_count = COUNT(*) FROM @Candidates;
 
-	-- 5. Finální akce / Odezva pro AI
+	-- 5. FinÃ¡lnÃ­ akce / Odezva pro AI
 	IF @match_count = 1
 	BEGIN
 		DECLARE @target_org BIGINT, @target_name NVARCHAR(255);
@@ -77,24 +77,24 @@ BEGIN
 
 		EXEC wwwr_setorganization @organization = @target_org, @noresult = 1;
 
-		SELECT 'Status' AS __block_name, 'OK' AS Status, 'Kontext úspìšnì pøepnut na organizaci: ' + @target_name AS Message;
+		SELECT 'Status' AS __block_name, 'OK' AS Status, 'Kontext ÃºspÄ›Å¡nÄ› pÅ™epnut na organizaci: ' + @target_name AS Message;
 	END
 	ELSE
 	BEGIN
 		-- ==============================================================================
-		-- Nalezeno VÍCE kandidátù (Ambiguita) -> Vracíme vícenásobnı result-set (Multi-RS)
+		-- Nalezeno VÃCE kandidÃ¡tÅ¯ (Ambiguita) -> VracÃ­me vÃ­cenÃ¡sobnÃ½ result-set (Multi-RS)
 		-- ==============================================================================
 		
-		-- Blok 1: Informace pro AI o tom, co se stalo a co má dìlat
+		-- Blok 1: Informace pro AI o tom, co se stalo a co mÃ¡ dÄ›lat
 		SELECT 
 			'Status' AS __block_name,
-			'Více shod' AS Status,
-			'Nalezeno více moností. Vyádejte si od uivatele upøesnìní z pøiloené tabulky organizací.' AS Message;
+			'VÃ­ce shod' AS Status,
+			'Nalezeno vÃ­ce moÅ¾nostÃ­. VyÅ¾Ã¡dejte si od uÅ¾ivatele upÅ™esnÄ›nÃ­ z pÅ™iloÅ¾enÃ© tabulky organizacÃ­.' AS Message;
 
-		-- Blok 2: Èistá datová tabulka (seznam kandidátù)
+		-- Blok 2: ÄŒistÃ¡ datovÃ¡ tabulka (seznam kandidÃ¡tÅ¯)
 		SELECT 
-			'Nalezené organizace' AS __block_name,
-			org_name AS [Název organizace]
+			'NalezenÃ© organizace' AS __block_name,
+			org_name AS [NÃ¡zev organizace]
 		FROM @Candidates
 		ORDER BY org_name;
 		
