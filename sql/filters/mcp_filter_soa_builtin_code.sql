@@ -1,4 +1,5 @@
 ﻿execute dropni 'mcp_filter_soa'
+execute dropni 'mcp_filter_soa_builtin_code'
 GO
 /*
 	Nástroj: mcp_filter_soa
@@ -6,7 +7,7 @@ GO
 	         Pokud nalezne právě jeden, uloží jeho builtin_code pod zadaný klíč.
 	         Pokud jich nalezne více, předá sémantické rozhodnutí na LLM.
 */
-CREATE PROCEDURE mcp_filter_soa
+CREATE PROCEDURE mcp_filter_soa_builtin_code
 	@free_text	NVARCHAR(MAX),
 	@save_as	VARCHAR(40),
 	@top_n		INT = 10
@@ -126,6 +127,6 @@ BEGIN
 	END
 END
 GO
-debuglogin 'hink'
-execute mcp_filter_soa '%',''
+--debuglogin 'hink'
+--execute mcp_filter_soa_builtin_code '%',''
 GO
