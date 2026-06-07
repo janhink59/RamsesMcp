@@ -17,6 +17,7 @@ declare(strict_types=1);
 ob_start();
 ini_set('display_errors', '0');                                     // Zamezení narušení UI surovými chybami
 error_reporting(E_ALL);                                             // Nechceme přijít o žádné skryté notice
+header('Content-Type: text/html; charset=utf-8');                   // Vynucení HTTP hlavičky pro IIS server
 
 $config = require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db_connect.php';

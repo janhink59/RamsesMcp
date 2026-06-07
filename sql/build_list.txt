@@ -13,6 +13,7 @@ create_fulltext_indexes.sql
 # Sdružené procedury a testovací data (samostatné mcp_tool_*.sql se nyní načítají automaticky)
 p_xlsx_mcp_tools.sql
 tools/*.sql
+filters/*.sql
 
 
 fillup_mcp_tools.sql

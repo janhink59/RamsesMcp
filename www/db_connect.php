@@ -59,6 +59,10 @@ function getMssqlConnection() {
 		throw new Exception("Kritická chyba: Globální konfigurace \$config['db'] nebyla nalezena. Skript musí běžet přes index.php.");
 	}
 	
+	if (!isset($config['db']['options']['CharacterSet'])) {
+		$config['db']['options']['CharacterSet'] = 'UTF-8';
+	}
+	
 	// 3. Pokus o fyzické připojení
 	// Používají se parametry z config.php, které mohly být modifikovány HTTP hlavičkami v index.php.
 	$conn = sqlsrv_connect($config['db']['server'], $config['db']['options']);
