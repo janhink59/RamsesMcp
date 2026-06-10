@@ -8,6 +8,7 @@ p_create_fulltext_index.sql
 
 # Vytvoření fulltextových indexů
 
+fillup_fulltext_stoplist.sql
 create_fulltext_indexes.sql
 
 # Sdružené procedury a testovací data (samostatné mcp_tool_*.sql se nyní načítají automaticky)

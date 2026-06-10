@@ -11,7 +11,7 @@ create procedure p_xlsx_mcp_tools
 	@import_mode varchar(1)='1'
 as
 
-execute debuglogin 'mcp_server'
+--execute debuglogin 'mcp_server'
 
 -- Smazání původních dat (zajištění idempotence pro bezpečné opakované spouštění)
 delete from mcp_filter

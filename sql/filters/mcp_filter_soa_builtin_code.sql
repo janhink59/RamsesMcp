@@ -8,7 +8,7 @@ GO
 	         Pokud jich nalezne více, předá sémantické rozhodnutí na LLM.
 */
 CREATE PROCEDURE mcp_filter_soa_builtin_code
-	@free_text	NVARCHAR(MAX),
+	@free_text	varchar(8000),
 	@save_as	VARCHAR(40),
 	@top_n		INT = 10
 AS
@@ -46,6 +46,13 @@ BEGIN
 		RETURN;
 	END
 
+	declare @ft table(original uuid primary key, rank int)
+	insert into @ft
+	select r.original, max(fr.rank) rank
+	from freetexttable(repo_regulation,*,@free_text,@top_n) fr
+		join repo_regulation r on r.uuid=fr.[KEY]
+	group by original
+
 	-- Ošetření chybějícího nebo neplatného top_n
 	IF ISNULL(@top_n, 0) <= 0 SET @top_n = 10;
 
@@ -61,18 +68,14 @@ BEGIN
 
 	INSERT INTO @Candidates (builtin_code, caption, description_text, fulltext_rank)
 	SELECT TOP (@top_n)
-		builtin_code, 
-		caption, 
-		description_text,
-		0 AS fulltext_rank
-	FROM v_repo_regulation
+		v.builtin_code, 
+		v.caption, 
+		v.description_text,
+		ft.rank fulltext_rank
+	FROM v_repo_regulation v
+		join @ft ft on ft.original=v.original
 	WHERE my_access = 1
-	  AND (
-		builtin_code LIKE '%' + @free_text + '%'
-		OR caption LIKE '%' + @free_text + '%'
-		OR description_text LIKE '%' + @free_text + '%'
-	  )
-	ORDER BY caption; -- Prozatímní řazení, dokud nebude fungovat fulltext skóre
+	ORDER BY ft.rank desc; -- Prozatímní řazení, dokud nebude fungovat fulltext skóre
 
 	DECLARE @match_count INT;
 	SELECT @match_count = COUNT(*) FROM @Candidates;
@@ -128,5 +131,5 @@ BEGIN
 END
 GO
 --debuglogin 'hink'
---execute mcp_filter_soa_builtin_code '%',''
+--execute mcp_filter_soa_builtin_code 'cloud',''
 GO
