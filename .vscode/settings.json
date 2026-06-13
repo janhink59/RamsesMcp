@@ -81,5 +81,11 @@
 		"zip",
 		"zlib",
 		"sqlsrv"
-	]
+	],
+	"intelephense.environment.includePaths": [
+		"F:/EclipseWorkspaces/Ramses/www"
+	],
+	"intelephense.diagnostics.undefinedSymbols": false,
+	"intelephense.diagnostics.undefinedVariables": "local",
+	"intelephense.diagnostics.undefinedProperties": false
 }
