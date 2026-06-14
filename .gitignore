@@ -1,4 +1,4 @@
 www/config.php
 --*
-sql/fillup_mcp_tools.sql
+fillup_*.sql
 rcfg_*

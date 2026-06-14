@@ -904,9 +904,9 @@ GO
 
 GO
 set xact_abort on
-begin tran
+--begin tran
 execute p_request_messages_start
 execute p_xlsx_fulltext_stoplist
 insert into service_logbook(name,version) values('Nastavení fulltextu','2026-06-10 00:00:00')
-commit
+--commit
 GO
