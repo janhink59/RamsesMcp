@@ -33,6 +33,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $startTime = microtime(true);
 require_once __DIR__ . '/db_interface.php';
 
+// NAČTENÍ GLOBÁLNÍ KNIHOVNY RAMSES (Symlink-safe metoda)
+// Detekce virtuální cesty, kterou vidí webový server, abychom z fyzického umístění neunikli ven z projektu.
+$virtualDir = dirname($_SERVER['SCRIPT_FILENAME']);
+$parentDir  = dirname($virtualDir); 
+require_once $parentDir . '/RamsesLib.php';
+
 /** * @global array $config Globální konfigurace z index.php 
  */
 global $config;
@@ -57,7 +63,9 @@ $dbi = new db_interface();
 // Router v index.php již vyřešil přepisy z HTTP hlaviček do pole $config
 $user = $config['mcp']['user'] ?? '';
 $pass = $config['mcp']['password'] ?? '';
-$ip   = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+
+// POUŽITÍ PŘEJMENOVANÉ FUNKCE PRO ZÍSKÁNÍ SÍŤOVÉ STOPY (Ošetření Proxy / VPN)
+$ip   = get_client_ip_path();
 
 try {
 	if (empty($user) || empty($pass)) {

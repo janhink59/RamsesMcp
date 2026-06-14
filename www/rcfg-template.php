@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /**
  * RamsesMcp - Konfigurační šablona
- * Tento soubor slouží jako vzor pro config.php, který má stejnou strukturu.
+ * Tento soubor slouží jako vzor pro rcfg_*.php (případně config.php), které mají stejnou strukturu.
  * Řadu nastavení mohou upřesnit http hlavičky, které začínají prefixem "X-Mcp-"
  * Bez hlaviček se pracuje v testovacím režimu prohlížeče.
  */
@@ -29,10 +29,17 @@ return [
 		'version'         => '2.0.0',				// Verze implementace
 		
 		/**
-		 * Nastavení kontextu uživatele aplikace (info.php), ne každý má přístup ke všemu, k aplikaci se MCP server musí přihlásit.
-		 * 
+		 * URL Prefix pro reverzní proxy a subadresáře (Multitenancy)
+		 * Používá se pro sestavení správné absolutní URL adresy (např. u odkazů na reporty).
+		 * - Pokud je aplikace v rootu webu (https://hostname/), ponechte prázdné: ''
+		 * - Pro intranet / subadresáře uveďte cestu s počátečním lomítkem (např.: '/ramses' nebo '/ramses/client1')
 		 */
-		'user'       => 'Administrator', // Výchozí login pro testování (X-Mcp-User), pro login 
+		'url_prefix'      => '/',
+		
+		/**
+		 * Nastavení kontextu uživatele aplikace (info.php), ne každý má přístup ke všemu, k aplikaci se MCP server musí přihlásit.
+		 * */
+		'user'       => 'Administrator', // Výchozí login pro testování (X-Mcp-User)
 		'password'   => 'admin123',      // Výchozí heslo pro testování (X-Mcp-Pass)
 	],
 

@@ -8,11 +8,10 @@ declare(strict_types=1);
  * (z prohlížeče i od AI klienta) musí procházet přes tento soubor.
  * * * HLAVNÍ ÚKOLY:
  * 1. ROUTING: Směřuje požadavky na základě parametru `?mode=` v URL.
- * 2. CONFIG ORCHESTRATION: Načítá statický soubor config.php a dynamicky jej 
- * přebíjí hodnotami z HTTP hlaviček (X-Mcp-*). To umožňuje bezpečné 
- * přepínání databází/uživatelů přímo z klienta (např. Page Assist).
- * 3. OUTPUT CONTROL: Zajišťuje integritu výstupu. Pro AI (režim 'main') je 
- * kritické, aby výstup neobsahoval žádné PHP varování nebo náhodné mezery, 
+ * 2. CONFIG ORCHESTRATION: Načítá dynamický konfigurační soubor rcfg_*.php podle aliasu.
+ * Přísně vyžaduje jeho existenci (žádný fallback) a přebíjí jej hodnotami z HTTP hlaviček.
+ * 3. OUTPUT CONTROL: Zajišťuje integritu výstupu. Pro AI (režim 'main') je
+ * kritické, aby výstup neobsahoval žádné PHP varování nebo náhodné mezery,
  * které by rozbily JSON formát.
  * * * PODPOROVANÉ REŽIMY (?mode=):
  * - mode=main : (Výchozí) Jádro pro JSON-RPC komunikaci s AI modely (Ollama, Claude).
@@ -21,7 +20,7 @@ declare(strict_types=1);
  */
 
 // 1. ZÁCHRANNÝ BUFFERING: Zachytí jakýkoliv nechtěný výstup (BOM, mezery, chyby v configu),
-// aby bylo možné jej v režimu 'main' vyčistit před odesláním JSON odpovědi.
+//    aby bylo možné jej v režimu 'main' vyčistit před odesláním JSON odpovědi.
 ob_start();
 
 // Zjištění režimu. Pokud parametr chybí, automaticky předpokládáme AI klienta.
@@ -33,9 +32,46 @@ if ($mode === 'main') {
 	error_reporting(E_ALL);
 }
 
-// 2. NAČTENÍ KONFIGURACE: Jediné přípustné místo pro require 'config.php'.
-// Výsledek je uložen do globální proměnné, kterou využívají db_connect a db_interface.
-$config = require_once __DIR__ . '/config.php';
+// 2. NAČTENÍ KONFIGURACE: Dynamická detekce instance na základě SERVER_NAME / HTTP_HOST.
+$CONFIG_SERVER_NAME = $_SERVER['SERVER_NAME'] ?? '';
+if (empty($CONFIG_SERVER_NAME) && isset($_SERVER['HTTP_HOST'])) {
+	$CONFIG_SERVER_NAME = explode(':', $_SERVER['HTTP_HOST'])[0];
+}
+
+// Vyčištění názvu pro bezpečné vyhledání souboru na disku (odstranění nepovolených znaků)
+$CONFIG_SERVER_NAME = preg_replace('/[^a-zA-Z0-9_.-]/', '', $CONFIG_SERVER_NAME);
+
+// Pokud se nepodaří zjistit název serveru (např. z CLI bez parametrů), použijeme výchozí localhost
+if ($CONFIG_SERVER_NAME === '') {
+	$CONFIG_SERVER_NAME = 'localhost';
+}
+
+$configFile = __DIR__ . '/rcfg_' . $CONFIG_SERVER_NAME . '.php';
+
+// Striktní ošetření chybějící multitenantní konfigurace bez fallbacku
+if (!file_exists($configFile)) {
+	if ($mode === 'main') {
+		// Okamžitá JSON-RPC odpověď s chybou. ID je null, protože payload ještě nečteme.
+		ob_clean();
+		header('Content-Type: application/json; charset=utf-8');
+		echo json_encode([
+			"jsonrpc" => "2.0",
+			"error" => [
+				"code" => -32000,
+				"message" => "Systémová chyba: Konfigurační soubor 'rcfg_{$CONFIG_SERVER_NAME}.php' na serveru neexistuje."
+			],
+			"id" => null
+		], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		exit;
+	} else {
+		// V režimu 'info' nebo 'test' vypíšeme srozumitelnou HTML chybu
+		ob_end_clean();
+		header('Content-Type: text/html; charset=utf-8');
+		die("<div style='color: #d93025; font-family: sans-serif; padding: 20px;'><strong>Kritická chyba:</strong> Požadovaný konfigurační soubor <code>rcfg_{$CONFIG_SERVER_NAME}.php</code> nebyl na serveru nalezen.</div>");
+	}
+}
+
+$config = require_once $configFile;
 
 /**
  * DYNAMICKÝ PŘEPIS KONFIGURACE (Context Injection):
