@@ -1,4 +1,4 @@
-# Vytvoření tabulek, pokud neexistují
+# Vytvoreni tabulek, pokud neexistuji
 create_tables.sql
 create_report_metadata_tables.sql
 create_table_mcp_saved_values.sql
@@ -6,12 +6,12 @@ p_create_fulltext_catalog.sql
 p_create_fulltext_index.sql
 
 
-# Vytvoření fulltextových indexů
+# Vytvoreni fulltextovych indexu
 
-fillup_fulltext_stoplist.sql
+f:/Dropbox/RamsesMcp/fillup_fulltext_stoplist.sql
 create_fulltext_indexes.sql
 
-# Sdružené procedury a testovací data (samostatné mcp_tool_*.sql se nyní načítají automaticky)
+# Sdruzene procedury a testovaci data (samostatne mcp_tool_*.sql se nyni nacitaji automaticky)
 p_xlsx_mcp_tools.sql
 p_*.sql
 mcp_*.sql
@@ -19,4 +19,4 @@ tools/*.sql
 filters/*.sql
 
 
-fillup_*.sql
+f:/Dropbox/RamsesMcp/fillup_*.sql

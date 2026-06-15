@@ -5,11 +5,12 @@ declare(strict_types=1);
 // RamsesDB - Nástroj pro sestavení databázových skriptů (PHP verze)
 // -----------------------------------------------------------------------------
 
+$projectName = "RamsesMcp";
 $manifestFile = 'build_list.txt';                               // Soubor se seznamem skriptů nebo masek (wildcards)
 $outputFile   = '--McpDeploy.sql';                              // Výsledný sloučený soubor
 
 echo "----------------------------------------------------------\n";
-echo "RamsesDB Auto-Deploy Build\n";
+echo "$projectName Auto-Deploy Build\n";
 echo "----------------------------------------------------------\n";
 
 // 1. Kontrola existence manifestu
@@ -37,19 +38,23 @@ echo "Sestavuji skript '{$outputFile}'...\n\n";
 fwrite($outHandle, "\xEF\xBB\xBF");
 
 // 4. Zápis hlavičky (čisté ASCII)
-$dateStr = date('Y-m-d H:i:s');
+$dateStr = date('Y-m-d H:i');
+$hostStr = gethostname();                                       // Získání identifikace počítače (hostname)
 $header  = "/* ==========================================\n";
-$header .= " * RamsesDB Auto-Deploy Build\n";
-$header .= " * Vygenerovano {$dateStr}\n";
+$header .= " * $projectName Auto-Deploy Build v. 02.06.2026\n";
+$header .= " * Datum vygenerování: {$dateStr}\n";
+$header .= " * Počítač: {$hostStr}\n";
+$header .= " * Kontrola kódování UTF-8 😊 (Příšerně žluťoučký kůň úpěl ďábelské ódy)\n";
 $header .= " * ========================================== */\n\n";
 fwrite($outHandle, $header);
 
 $fileCount = 0;
+$processedFiles = [];                                           // Globální registr pro sledování již vložených souborů
 
 /**
  * Pomocná funkce pro bezpečné přečtení souboru, odstranění BOM z paměti
  * a konverzi z Windows-1250 do UTF-8 v případě nalezení 8bitové diakritiky.
- * * @param string $filePath Cesta k souboru
+ * @param string $filePath Cesta k souboru
  * @param bool &$converted Indikátor, zda došlo ke konverzi kódování
  * @return string Obsah souboru v čistém UTF-8 bez BOM
  */
@@ -77,8 +82,14 @@ $manifestLines = file($manifestFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LIN
 foreach ($manifestLines as $line) {
 	$line = trim($line);
 	
+	if($line==='return;'){
+		echo "[INFO] Narazeno na 'return;' v manifestu, zpracovani preruseno.\n";
+		break;
+	}
+
 	// Ignorování komentářů v manifestu
 	if (str_starts_with($line, '#')) {
+		echo "\n\n$line";
 		continue;
 	}
 	
@@ -90,25 +101,39 @@ foreach ($manifestLines as $line) {
 		continue;
 	}
 	
+	// APLIKACE PŘIROZENÉHO TŘÍDĚNÍ (SHODNÉ S WINDOWS TYPE)
+	natcasesort($files);
+	
+	echo "\n$line ";
 	foreach ($files as $file) {
 		if (is_file($file)) {
+			echo ".";
+			// Získání absolutní cesty pro 100% zamezení duplicit i při různých formátech zápisu cest
+			$realPath = realpath($file);
+			
+			// Ochrana proti duplicitnímu vložení souboru (pokud již je v asociativním poli)
+			if (isset($processedFiles[$realPath])) {
+				continue;                                       // Soubor byl zařazen dříve přes konkrétní zápis, ignorujeme
+			}
+			
 			// Přečtení obsahu s odříznutím BOM a validací/konverzí kódování
 			$wasConverted = false;
 			$cleanContent = $processContent($file, $wasConverted);
 			
 			// Výpis informace o zpracování
-			$conversionInfo = $wasConverted ? " [konvertovano z Windows-1250]" : "";
-			echo "Pridavam: {$file}{$conversionInfo}\n";
+			// $conversionInfo = $wasConverted ? " [konvertovano z Windows-1250]" : "";
+			// echo "Pridavam: {$file}{$conversionInfo}\n";
 			
 			// Zápis metadatového komentáře
-			fwrite($outHandle, "/* --- Nacteno z: {$file}{$conversionInfo} --- */\n");
+			// fwrite($outHandle, "/* --- Nacteno z: {$file}{$conversionInfo} --- */\n");
 			
-			// Zápis vyčištěného obsahu
+			// Zápis vyčištěného obsahu do výstupního DB skriptu
 			fwrite($outHandle, $cleanContent);
 			
 			// Vložení separátoru dávky pro MSSQL
-			fwrite($outHandle, "\nGO\n\n");
+			// fwrite($outHandle, "\nGO\n\n");
 			
+			$processedFiles[$realPath] = true;                  // Registrace souboru do paměti jako "zpracováno"
 			$fileCount++;
 		}
 	}
