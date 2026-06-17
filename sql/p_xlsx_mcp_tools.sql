@@ -63,6 +63,26 @@ WHERE
 		WHERE p.mcp_tool = t.mcp_tool AND p.param_name = 'save_as'
 	);
 
+-- PŘIDÁNÍ GLOBÁLNÍHO PARAMETRU 'save_only' KE VŠEM GENERICKÝM NÁSTROJŮM
+INSERT INTO mcp_tool_param (mcp_tool, param_name, param_title, param_type, description, is_required)
+SELECT 
+	t.mcp_tool, 
+	'save_only', 
+	'Pouze uložit (bez detailního výpisu dat)', 
+	'int', 
+	'Volitelný parametr (0 nebo 1). Pokud pošleš 1, nástroj ti nevrátí obsáhlá data, ale pouze potvrdí jejich uložení na pozadí. Pokud pošleš 0, vrátí ti detailní seznam záznamů k prozkoumání.', 
+	0
+FROM 
+	mcp_tool t
+WHERE 
+	t.is_generic = 1
+	AND NOT EXISTS (
+		-- Ochrana proti duplicitnímu vložení
+		SELECT 1 
+		FROM mcp_tool_param p 
+		WHERE p.mcp_tool = t.mcp_tool AND p.param_name = 'save_only'
+	);
+
 -- =====================================================================
 -- 2. IMPORT REPORTŮ (MCP REPORTS)
 -- =====================================================================

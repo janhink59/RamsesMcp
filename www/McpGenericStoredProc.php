@@ -80,7 +80,16 @@ class McpGenericStoredProc extends McpTool {
 			
 			// OPRAVA KÓDOVÁNÍ: sqlsrv_errors vrací na českých Windows chybové zprávy v CP1250.
 			// Pro úspěšný json_encode je musíme natvrdo převést do UTF-8.
-			$errorStringUtf8 = mb_convert_encoding($errorString, 'UTF-8', 'Windows-1250');
+			try {
+				// ZMĚNA: Používáme 'CP1250' místo 'Windows-1250'
+				$errorStringUtf8 = mb_convert_encoding($errorString, 'UTF-8', 'CP1250');
+			} catch (ValueError $e) {
+				// Bezpečnostní fallback, pokud by modul mbstring neznal identifikátor CP1250
+				$errorStringUtf8 = iconv('CP1250', 'UTF-8//IGNORE', $errorString);
+				if ($errorStringUtf8 === false) {
+					$errorStringUtf8 = "Chyba DB (nelze prevest kodovani z CP1250 do UTF-8).";
+				}
+			}
 			
 			return $this->error("Chyba při provádění procedury {$procName}:\n" . $errorStringUtf8);
 		}

@@ -203,20 +203,28 @@ class db_interface {
 		$toolDefs = $this->mcp_tool_params[$tool_name] ?? [];
 		$toolMeta = $this->mcp_tool_list[$tool_name];
 		
-		// 2. Příprava argumentů a odstranění save_as (nesmí zasáhnout logiku samotného nástroje)
+		// 2. Příprava argumentů a odstranění save_as i save_only (nesmí zasáhnout logiku samotného nástroje)
 		$execParams = $params ?? [];
 		$execDefs   = [];
 		$saveAs     = $execParams['save_as'] ?? null;
 		
+		// Vytažení a výchozí nastavení parametru save_only (implicitně 0 = plná data)
+		$saveOnly   = isset($execParams['save_only']) ? (int)$execParams['save_only'] : 0;
+		
+		// Fallback: Pokud jde o dispečer filtrů a nebylo řečeno kam uložit, uložíme to pod názvem filtru
+		if (strtolower($tool_name) === 'set_filter' && empty($saveAs) && !empty($execParams['filter_code'])) {
+			$saveAs = trim((string)$execParams['filter_code']);
+		}
+		
 		foreach ($toolDefs as $def) {
-			if ($def['param_name'] !== 'save_as') {
+			// Parametry řízení orchestrátoru nepředáváme dál do fyzických SQL procedur
+			if ($def['param_name'] !== 'save_as' && $def['param_name'] !== 'save_only') {
 				$execDefs[] = $def;
 			}
 		}
 		
-		if (isset($execParams['save_as'])) {
-			unset($execParams['save_as']);
-		}
+		if (isset($execParams['save_as'])) unset($execParams['save_as']);
+		if (isset($execParams['save_only'])) unset($execParams['save_only']);
 
 		// 3. Rozhodovací logika pro instancování správného objektu (Routing)
 		require_once __DIR__ . '/McpTool.php';
@@ -237,7 +245,7 @@ class db_interface {
 
 			require_once $classFile;
 			if (!class_exists($className) || !is_subclass_of($className, 'McpTool')) {
-				$this->last_error = "Třída $className musí existovat a dědit z McpTool.";
+				$this->last_error = "Třída $className must existovat a dědit z McpTool.";
 				return false;
 			}
 
@@ -257,21 +265,17 @@ class db_interface {
 		$tsvString = $result['content'][0]['text'] ?? '';
 		$this->parseTsvToData($tsvString);
 
-		// 6. Orchestrace volitelného parametru save_as a pevného řádkového kontextu row_{tool_name}
-		return $this->processSaveAs($tool_name, $saveAs);
+		// 6. Orchestrace volitelných parametrů save_as, save_only a pevného řádkového kontextu row_{tool_name}
+		return $this->processSaveAs($tool_name, $saveAs, $saveOnly);
 	}
 
 	/**
 	 * Pomocná metoda pro parsování unifikovaného TSV výstupu zpět do strukturované podoby bloků.
-	 * ARCHITEKTONICKÁ ZMĚNA: Nyní plně podporuje více result-setů (bloků) oddělených tagem ===.
-	 *
-	 * @param string $tsvString Surový TSV řetězec z McpTool objektu.
 	 */
 	private function parseTsvToData(string $tsvString): void {
 		$this->mcp_tool_data = [];
 		$lines = explode("\n", trim($tsvString));
 		
-		// Ošetření prázdných výstupů nebo chybových zpráv
 		if (count($lines) > 0 && !str_contains($lines[0], "\t") && !str_starts_with($lines[0], '===') && $lines[0] !== '') {
 			$firstLine = trim($lines[0]);
 			if (str_starts_with($firstLine, 'Žádná data') || str_starts_with($firstLine, 'Chyba')) {
@@ -287,9 +291,7 @@ class db_interface {
 			$line = trim($line);
 			if ($line === '') continue;
 
-			// Detekce začátku nového bloku na základě tagů, které generuje McpGenericStoredProc
 			if (preg_match('/^===\s*(.+?)\s*===$/', $line, $matches)) {
-				// Pokud už máme načtený předchozí blok, uložíme jej
 				if ($currentHeaders !== null || !empty($currentRows)) {
 					$this->mcp_tool_data[] = [
 						'block_name' => $currentBlockName,
@@ -303,10 +305,8 @@ class db_interface {
 			}
 
 			if ($currentHeaders === null) {
-				// První řádek dat po hlavičce (nebo na úplném začátku) jsou sloupce
 				$currentHeaders = explode("\t", $line);
 			} else {
-				// Další řádky jsou samotná data
 				$values = explode("\t", $line);
 				$row = [];
 				foreach ($currentHeaders as $index => $header) {
@@ -316,7 +316,6 @@ class db_interface {
 			}
 		}
 
-		// Uložení posledního otevřeného bloku po dojetí smyčky
 		if ($currentHeaders !== null || !empty($currentRows)) {
 			$this->mcp_tool_data[] = [
 				'block_name' => $currentBlockName,
@@ -326,23 +325,17 @@ class db_interface {
 	}
 
 	/**
-	 * Pomocná metoda pro plnění kontextu a zachycení stavu nástroje (Claim Check pattern).
-	 * Nyní bezpečně iteruje přes strukturu s vícero bloky (result-sety).
-	 *
-	 * @param string $tool_name Název aktuálně exekuovaného MCP nástroje.
-	 * @param mixed  $saveAs    Hodnota volitelného parametru (string nebo null).
-	 * @return bool             True při úspěšném zpracování celého kontextového bloku.
+	 * Pomocná metoda pro plnění kontextu a zachycení stavu nástroje.
+	 * ORCHESTRÁTOR NYNÍ SÁM GENERUJE TEXTOVÉ ZPRÁVY PRO LLM na základě zjištěného počtu dat.
 	 */
-	private function processSaveAs(string $tool_name, $saveAs): bool {
-		// Normalizace názvu nástroje pro splnění CHECK constraintu tabulky mcp_saved_values
+	private function processSaveAs(string $tool_name, $saveAs, int $saveOnly): bool {
 		$pureName = preg_replace('/[^a-zA-Z0-9_]/', '', strtolower($tool_name));
 		$autoVarName = 'row_' . $pureName;
 
-		// Validace a pročištění explicitního parametru save_as, pokud byl předán
 		if (is_string($saveAs) && trim($saveAs) !== '') {
 			$saveAs = trim($saveAs);
 			if (!preg_match('/^[a-z0-9_]+$/', $saveAs)) {
-				$this->last_error = "Parametr 'save_as' obsahuje nepovolené znaky. Jsou povolena pouze malá písmena, číslice a podtržítko.";
+				$this->last_error = "Parametr 'save_as' obsahuje nepovolené znaky.";
 				return false;
 			}
 		} else {
@@ -351,109 +344,115 @@ class db_interface {
 
 		$sessionId = $GLOBALS['mcp_session_id'] ?? null;
 		if (!$sessionId) {
-			$this->last_error = "Kritická chyba: Chybí kontext databázové relace (mcp_session_id) nutný pro uložení proměnné.";
+			$this->last_error = "Kritická chyba: Chybí kontext databázové relace (mcp_session_id).";
 			return false;
 		}
 
-		// 1. KROK: Vyčištění předchozího stavu automatické kontextové proměnné row_{tool_name}
+		// 1. KROK: Vyčištění předchozího stavu
 		$sqlDeleteAuto = "DELETE FROM mcp_saved_values WHERE wwwsession = ? AND save_as = ?";
 		$stmtDeleteAuto = sqlsrv_query($this->db, $sqlDeleteAuto, [$sessionId, $autoVarName]);
-		if ($stmtDeleteAuto === false) {
-			$this->last_error = "Chyba při promazávání automatické proměnné v mcp_saved_values:\n" . print_r(sqlsrv_errors(), true);
-			return false;
-		}
-		sqlsrv_free_stmt($stmtDeleteAuto);
+		if ($stmtDeleteAuto !== false) sqlsrv_free_stmt($stmtDeleteAuto);
 
-		// 2. KROK: Vyčištění předchozího stavu explicitní proměnné save_as (pokud existuje)
 		if ($saveAs !== null) {
 			$sqlDeleteSaveAs = "DELETE FROM mcp_saved_values WHERE wwwsession = ? AND save_as = ?";
 			$stmtDeleteSaveAs = sqlsrv_query($this->db, $sqlDeleteSaveAs, [$sessionId, $saveAs]);
-			if ($stmtDeleteSaveAs === false) {
-				$this->last_error = "Chyba při promazávání explicitní proměnné v mcp_saved_values:\n" . print_r(sqlsrv_errors(), true);
-				return false;
-			}
-			sqlsrv_free_stmt($stmtDeleteSaveAs);
+			if ($stmtDeleteSaveAs !== false) sqlsrv_free_stmt($stmtDeleteSaveAs);
 		}
 
 		$rowIndex = 0;
 		$sqlInsert = "INSERT INTO mcp_saved_values (wwwsession, save_as, row_index, saved_data) VALUES (?, ?, ?, ?)";
+		
+		$filteredData = [];
+		$customMessagePassed = false;
 
-		// 3. KROK: Sekvenční procházení dat všech bloků a zápis do relačních struktur
+		// 2. KROK: Procházení dat a uložení
 		if (!empty($this->mcp_tool_data)) {
 			foreach ($this->mcp_tool_data as $block) {
-				foreach ($block['rows'] as $row) {
-					
-					// Extrakce skutečného primárního klíče (první sloupec za injected row_number)
-					$valToSave = null;
-					foreach ($row as $key => $val) {
-						if ($key !== 'row_number') {
-							$valToSave = $val;
-							break;
+				if (empty($block['rows'])) continue;
+				
+				$firstColName = array_key_first($block['rows'][0]);
+				$isMessageBlock = in_array(strtolower((string)$firstColName), ['result', 'msg', 'message', 'error']);
+				
+				if ($isMessageBlock) {
+					// Pokud by SQL vyhodilo explicitní chybovou nebo varovnou zprávu, propustíme ji.
+					$filteredData[] = $block;
+					$customMessagePassed = true;
+				} else {
+					// Jsou to data! Automaticky je uložíme do databáze.
+					foreach ($block['rows'] as $row) {
+						$valToSave = null;
+						foreach ($row as $key => $val) {
+							if ($key !== 'row_number') {
+								$valToSave = $val;
+								break;
+							}
 						}
-					}
-					
-					if ($valToSave === null) {
-						$valToSave = reset($row);
-					}
-					
-					$strVal = ($valToSave === null) ? null : (string)$valToSave;
-					
-					if ($strVal !== null && mb_strlen($strVal) > 200) {
-						$strVal = mb_substr($strVal, 0, 200);
-					}
-
-					// ZÁSADNÍ ZMĚNA: Ignorujeme 'row_number' z dat (může se resetovat při novém result-setu)
-					// a využíváme náš striktně globální $rowIndex, abychom neporušili unikátní klíč DB
-					$autoIndex = $rowIndex + 1;
-
-					// A) Zápis do automatické proměnné row_{tool_name} (index odpovídá globálnímu číslu řádku)
-					$stmtInsertAuto = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $autoVarName, $autoIndex, $strVal]);
-					if ($stmtInsertAuto === false) {
-						$this->last_error = "Chyba při zápisu do automatické proměnné na indexu {$autoIndex}:\n" . print_r(sqlsrv_errors(), true);
-						return false;
-					}
-					sqlsrv_free_stmt($stmtInsertAuto);
-
-					// B) Zápis do volitelné proměnné save_as (pokud byla LLM vyžádána - standardní indexování od 0)
-					if ($saveAs !== null) {
-						$stmtInsertSaveAs = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $saveAs, $rowIndex, $strVal]);
-						if ($stmtInsertSaveAs === false) {
-							$this->last_error = "Chyba při zápisu do explicitní proměnné save_as na indexu {$rowIndex}:\n" . print_r(sqlsrv_errors(), true);
-							return false;
+						
+						if ($valToSave === null) $valToSave = reset($row);
+						$strVal = ($valToSave === null) ? null : (string)$valToSave;
+						
+						if ($strVal !== null && mb_strlen($strVal) > 200) {
+							$strVal = mb_substr($strVal, 0, 200);
 						}
-						sqlsrv_free_stmt($stmtInsertSaveAs);
-					}
 
-					$rowIndex++;
+						$autoIndex = $rowIndex + 1;
+
+						$stmtInsertAuto = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $autoVarName, $autoIndex, $strVal]);
+						if ($stmtInsertAuto !== false) sqlsrv_free_stmt($stmtInsertAuto);
+
+						if ($saveAs !== null) {
+							$stmtInsertSaveAs = sqlsrv_query($this->db, $sqlInsert, [$sessionId, $saveAs, $rowIndex, $strVal]);
+							if ($stmtInsertSaveAs !== false) sqlsrv_free_stmt($stmtInsertSaveAs);
+						}
+
+						$rowIndex++;
+					}
+					
+					if ($saveOnly === 0) {
+						$filteredData[] = $block;
+					}
 				}
 			}
 		}
 
-		// 4. KROK: Finální úprava výstupu podle přítomnosti save_as
-		if ($saveAs !== null) {
-			// Pokud bylo save_as vyplněno, LLM dostane pouze zprávu o úspěšném uložení dat (Claim-Check pattern)
+		// 3. KROK: GENERUJEME INTELIGENTNÍ ZPRÁVU V ORCHESTRÁTORU (zamezení duplicity v SQL)
+		if ($rowIndex > 0) {
+			$targetVar = $saveAs !== null ? $saveAs : $autoVarName;
+			
+			if ($rowIndex === 1) {
+				$msg = "ÚSPĚCH: Nalezen přesně 1 záznam. Identifikátor byl automaticky uložen do kontextové proměnné '{$targetVar}'.";
+			} else {
+				$msg = "ÚSPĚCH: Nalezeno {$rowIndex} záznamů. Identifikátory byly uloženy do kontextové proměnné '{$targetVar}'.";
+			}
+
+			$sysBlock = [
+				'block_name' => 'System',
+				'rows'       => [['result' => $msg]]
+			];
+
+			if ($saveOnly === 1) {
+				// Vracíme JEN zprávu
+				$this->mcp_tool_data = [$sysBlock];
+			} else {
+				// Připojíme zprávu PŘED samotná data
+				array_unshift($filteredData, $sysBlock);
+				$this->mcp_tool_data = $filteredData;
+			}
+		} elseif (!$customMessagePassed) {
+			// SQL nevrátilo ani data, ani vlastní chybovou zprávu
 			$this->mcp_tool_data = [
 				[
 					'block_name' => 'System',
-					'rows'       => [
-						[
-							'rows' => $rowIndex,
-							'msg'  => "Data uložena jako '{$saveAs}'"
-						]
-					]
+					'rows'       => [['result' => "UPOZORNĚNÍ: Dotaz nevrátil žádná data."]]
 				]
 			];
+		} else {
+			$this->mcp_tool_data = $filteredData;
 		}
-		// Pokud save_as vyplněno nebylo, $this->mcp_tool_data se nemění.
 
 		return true;
 	}
 
-	/**
-	 * Formátuje buffer mcp_tool_data (nyní vícero bloků) jako HTML tabulky pro zobrazení v testovacím UI.
-	 *
-	 * @return string HTML reprezentace výsledku
-	 */
 	public function getResponseAsHtml(): string {
 		if ($this->last_error !== null) {
 			return "<div class='error' style='color: #d93025; padding: 10px; font-weight: bold;'>Chyba: " . htmlspecialchars($this->last_error) . "</div>";
@@ -464,7 +463,6 @@ class db_interface {
 
 		$html = "";
 		foreach ($this->mcp_tool_data as $block) {
-			// Zobrazení názvu bloku, pokud existuje (např. oddělení více result-setů)
 			if (!empty($block['block_name'])) {
 				$html .= "<h4 style='margin-top: 15px; margin-bottom: 5px; color: #2d3748; border-bottom: 1px solid #edf2f7; padding-bottom: 4px;'>" . htmlspecialchars($block['block_name']) . "</h4>\n";
 			}
@@ -493,11 +491,6 @@ class db_interface {
 		return $html;
 	}
 
-	/**
-	 * Formátuje vícero bloků z bufferu mcp_tool_data zpět do TSV pro odeslání MCP AI klientovi.
-	 *
-	 * @return array JSON-RPC Content pole s textovou zprávou
-	 */
 	public function getResponseAsMcpJson(): array {
 		if ($this->last_error !== null) {
 			return [
@@ -514,7 +507,6 @@ class db_interface {
 		$tsv = "";
 		
 		foreach ($this->mcp_tool_data as $block) {
-			// Vrácení hlaviček bloků pro orientaci LLM
 			if (!empty($block['block_name'])) {
 				$tsv .= "=== " . $block['block_name'] . " ===\n";
 			}
@@ -537,16 +529,6 @@ class db_interface {
 		];
 	}
 
-	/**
-	 * Loguje aktivitu do tabulky mcp_log pro účely auditu a debugování.
-	 *
-	 * @param string|null $requestId ID požadavku z JSON-RPC od klienta
-	 * @param string $method         Volaná metoda (např. tools/call)
-	 * @param string $payloadIn      Kompletní syrový JSON vstup
-	 * @param string $payloadOut     Kompletní syrový JSON výstup
-	 * @param int $durationMs        Doba zpracování v milisekundách
-	 * @param bool $isError          Příznak, zda požadavek skončil chybou
-	 */
 	public function logRequest(?string $requestId, string $method, string $payloadIn, string $payloadOut, int $durationMs, bool $isError): void {
 		$sql = "INSERT INTO mcp_log (request_id, method, payload_in, payload_out, duration_ms, error_flag) 
 				VALUES (?, ?, ?, ?, ?, ?)";

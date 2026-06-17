@@ -12,6 +12,8 @@ f:/Dropbox/RamsesMcp/fillup_fulltext_stoplist.sql
 create_fulltext_indexes.sql
 
 # Sdruzene procedury a testovaci data (samostatne mcp_tool_*.sql se nyni nacitaji automaticky)
+v_*.sql
+
 p_xlsx_mcp_tools.sql
 p_*.sql
 mcp_*.sql
