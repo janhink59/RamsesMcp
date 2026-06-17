@@ -127,11 +127,8 @@ foreach ($manifestLines as $line) {
 			// Zápis metadatového komentáře
 			// fwrite($outHandle, "/* --- Nacteno z: {$file}{$conversionInfo} --- */\n");
 			
-			// Zápis vyčištěného obsahu do výstupního DB skriptu
-			fwrite($outHandle, $cleanContent);
-			
-			// Vložení separátoru dávky pro MSSQL
-			// fwrite($outHandle, "\nGO\n\n");
+			// Zápis vyčištěného obsahu do výstupního DB skriptu s vynuceným odřádkováním
+			fwrite($outHandle, $cleanContent . "\n");
 			
 			$processedFiles[$realPath] = true;                  // Registrace souboru do paměti jako "zpracováno"
 			$fileCount++;
