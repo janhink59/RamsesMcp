@@ -39,8 +39,7 @@ $virtualDir = dirname($_SERVER['SCRIPT_FILENAME']);
 $parentDir  = dirname($virtualDir); 
 require_once $parentDir . '/RamsesLib.php';
 
-/** * @global array $config Globální konfigurace z index.php 
- */
+/** @global array $config Globální konfigurace z index.php */
 global $config;
 
 // 1. Získání a parsování payloadu
@@ -132,6 +131,9 @@ function sendResponse($id, $result, ?array $error, ?db_interface $dbi) {
 		$resp["id"] = $id;
 	} elseif ($error !== null && isset($request['id'])) {
 		$resp["id"] = $request['id'];
+	} else {
+		// OPRAVA PRO MCP SDK: "id" nesmí nikdy chybět a nesmí být null, ani při absolutním selhání.
+		$resp["id"] = 0;
 	}
 
 	if ($error) {
