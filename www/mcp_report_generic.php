@@ -4,8 +4,9 @@ declare(strict_types=1);
 /**
  * RamsesMcp - mcp_report_generic.php
  * * Generický vykreslovač reportů. Zpracovává zobrazení reportů, které nemají
- * vlastní custom proxy skript. Výsledky čte buď jako `EXEC procedura` nebo
- * `SELECT * FROM view WHERE...` (zohledňuje parametry z $_POST).
+ * vlastní custom proxy skript. Výsledky čte buď jako `EXEC procedura`,
+ * `SELECT [sloupce] FROM view WHERE... ORDER BY...` nebo `SELECT [sloupce] FROM funkcia(...)`
+ * (zohledňuje parametry z $_POST).
  */
 
 // Předpokládáme, že $conn, $reportCode, $reportMeta a $parameters
@@ -15,19 +16,43 @@ if (!isset($reportCode) || !isset($conn)) {
 	die("Chyba: Skript nelze volat napřímo. Musí být volán z mcp_report.php.");
 }
 
-// 1. Zjištění názvu procedury/view z číselníku
+// 1. Zjištění názvu procedury/view/funkce a metadat z číselníku
 $procName = '';
-$sqlProc = "SELECT procedure_name FROM mcp_report WHERE report_code = ?";
+$selectCols = '*';
+$orderBy = '';
+$sqlProc = "SELECT procedure_name, select_columns, order_by FROM mcp_report WHERE report_code = ?";
 $stmtProc = sqlsrv_query($conn, $sqlProc, [$reportCode]);
 if ($stmtProc && sqlsrv_has_rows($stmtProc)) {
 	$rowProc = sqlsrv_fetch_array($stmtProc, SQLSRV_FETCH_ASSOC);
 	$procName = trim((string)$rowProc['procedure_name']);
+	$selectCols = trim((string)$rowProc['select_columns']);
+	if ($selectCols === '') $selectCols = '*';
+	$orderBy = trim((string)$rowProc['order_by']);
 }
 if ($procName === '') {
 	$procName = 'mcp_report_' . $reportCode;
 }
 
-// 2. Zjištění typu objektu v databázi (Procedura vs View)
+// 1.5 Načtení aliasů sloupců (Fallback / Override pattern)
+$columnAliases = [];
+// A) Globální aliasy
+$sqlGlobal = "SELECT column_name, header_title FROM mcp_report_columns WHERE report_code = ''";
+$stmtGlobal = sqlsrv_query($conn, $sqlGlobal);
+if ($stmtGlobal) {
+	while ($row = sqlsrv_fetch_array($stmtGlobal, SQLSRV_FETCH_ASSOC)) {
+		$columnAliases[$row['column_name']] = $row['header_title'];
+	}
+}
+// B) Specifické aliasy pro tento report (přepíší ty globální)
+$sqlSpecific = "SELECT column_name, header_title FROM mcp_report_columns WHERE report_code = ?";
+$stmtSpecific = sqlsrv_query($conn, $sqlSpecific, [$reportCode]);
+if ($stmtSpecific) {
+	while ($row = sqlsrv_fetch_array($stmtSpecific, SQLSRV_FETCH_ASSOC)) {
+		$columnAliases[$row['column_name']] = $row['header_title'];
+	}
+}
+
+// 2. Zjištění typu objektu v databázi (Procedura vs View vs Funkce)
 $objType = 'SQL_STORED_PROCEDURE';
 $sqlObj = "SELECT type_desc FROM sys.objects WHERE object_id = OBJECT_ID(?)";
 $stmtObj = sqlsrv_query($conn, $sqlObj, [$procName]);
@@ -39,8 +64,8 @@ if ($stmtObj && sqlsrv_has_rows($stmtObj)) {
 // 3. Sestavení finálního T-SQL dotazu
 $sql = "";
 if (strpos(strtoupper($objType), 'VIEW') !== false || strpos(strtoupper($objType), 'USER_TABLE') !== false) {
-	// POHLED: Skládáme WHERE přesně z předaných parametrů a spoléháme na shodu názvů
-	$sql = "SELECT * FROM " . $procName;
+	// POHLED / TABULKA: Skládáme WHERE přesně z předaných parametrů a aplikujeme select a order
+	$sql = "SELECT {$selectCols} FROM " . $procName;
 	$where = [];
 	foreach ($parameters as $pName => $pData) {
 		if (isset($_POST[$pName]) && $_POST[$pName] !== '') {
@@ -63,6 +88,37 @@ if (strpos(strtoupper($objType), 'VIEW') !== false || strpos(strtoupper($objType
 	if (!empty($where)) {
 		$sql .= " WHERE " . implode(" AND ", $where);
 	}
+	if ($orderBy !== '') {
+		$sql .= " ORDER BY " . $orderBy;
+	}
+} elseif (strpos(strtoupper($objType), 'FUNCTION') !== false) {
+	// TABULKOVÁ FUNKCE: Načteme parametry z sys.parameters pro dodržení přesného pořadí signatury
+	$funcArgs = [];
+	$sqlArgs = "SELECT name FROM sys.parameters WHERE object_id = OBJECT_ID(?) AND parameter_id > 0 ORDER BY parameter_id";
+	$stmtArgs = sqlsrv_query($conn, $sqlArgs, [$procName]);
+	if ($stmtArgs) {
+		while ($rowArg = sqlsrv_fetch_array($stmtArgs, SQLSRV_FETCH_ASSOC)) {
+			$pNameWithAt = (string)$rowArg['name'];
+			$pName = ltrim($pNameWithAt, '@');
+			
+			if (isset($_POST[$pName]) && $_POST[$pName] !== '') {
+				$val = $_POST[$pName];
+				$litType = isset($parameters[$pName]['type']) ? $parameters[$pName]['type'] : 'string';
+				
+				if (is_array($val)) {
+					// Pokud je předáno pole do skalárního parametru funkce, spojíme prvky do CSV řetězce
+					$csvVal = implode(',', $val);
+					$funcArgs[] = stripsl($csvVal, $litType);
+				} else {
+					$funcArgs[] = stripsl($val, $litType);
+				}
+			} else {
+				$funcArgs[] = "NULL";
+			}
+		}
+	}
+	// U funkcí order_by ignorujeme (není aplikovatelné), ale select_columns aplikujeme
+	$sql = "SELECT {$selectCols} FROM " . $procName . "(" . implode(", ", $funcArgs) . ")";
 } else {
 	// ULOŽENÁ PROCEDURA: O parametry se postará sám SQL Server skrz aktuální @@SPID a kontext
 	$sql = "SET NOCOUNT ON;\nEXEC " . $procName;
@@ -97,10 +153,12 @@ if ($dbquery !== false && $dbquery !== 1) {
 				foreach ($row as $colName => $value) {
 					if (!is_numeric($colName)) { // Ramses fetch() vrací čísla i stringy
 						$colNames[] = $colName;
-						$htmlTables .= "\t\t\t\t<th>" . htmlspecialchars($colName) . "</th>\n";
+						// Použití aliasu z databáze, nebo fallback na název sloupce
+						$displayName = $columnAliases[$colName] ?? $colName;
+						$htmlTables .= "\t\t\t\t<th>" . htmlspecialchars((string)$displayName) . "</th>\n";
 					}
 				}
-				$htmlTables .= "\t\t\t</tr>\n\t\t</thead>\n\t\t<tbody>\n";
+				$htmlTables .= "\t\t\t</tr>\n\t\t</thead>\n\t\t\t<tbody>\n";
 				$isFirstRow = false;
 			}
 			
@@ -123,7 +181,9 @@ if ($dbquery !== false && $dbquery !== 1) {
 			if ($metadata) {
 				$htmlTables .= "\t\t<thead>\n\t\t\t<tr>\n";
 				foreach ($metadata as $field) {
-					$htmlTables .= "\t\t\t\t<th>" . htmlspecialchars($field['Name']) . "</th>\n";
+					$colName = $field['Name'];
+					$displayName = $columnAliases[$colName] ?? $colName;
+					$htmlTables .= "\t\t\t\t<th>" . htmlspecialchars((string)$displayName) . "</th>\n";
 				}
 				$htmlTables .= "\t\t\t</tr>\n\t\t</thead>\n\t\t<tbody>\n";
 				$htmlTables .= "\t\t\t<tr><td colspan='" . count($metadata) . "' class='empty-state'>Žádná data k zobrazení.</td></tr>\n";

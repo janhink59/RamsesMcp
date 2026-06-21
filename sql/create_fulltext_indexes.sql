@@ -12,8 +12,9 @@ descrip'
 
 execute p_create_fulltext_index 'mcp_scenario','
 title,
-intent ,
-keywords'
+intent,
+keywords,instructions'
+,@force=1
 
 execute p_create_fulltext_index 'repo_regulation','
 builtin_code,

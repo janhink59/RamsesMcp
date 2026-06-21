@@ -11,12 +11,14 @@ class xlsx_mcp_tools extends xlsx_abstract{
 				
 				->setDataType("scenario_code,title,intent,keywords,when_to_use,when_not_to_use,instructions","varchar","mcp_scenario")
 				
-				->setDataType("report_code,title,procedure_name,description","varchar","mcp_report")
+				->setDataType("report_code,title,procedure_name,description,select_columns,order_by","varchar","mcp_report")
 				->setDataType("is_generic,more_results","bit")
  
  				->setDataType("report_code,param_name,param_title,param_type,is_array,description,is_required","varchar","mcp_report_param")
  				
 				->setDataType("filter_code,free_text_description","varchar","mcp_filter")
+				
+				->setDataType("report_code,name,header","varchar","mcp_report_columns");
 				;
     }
 }

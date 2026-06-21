@@ -48,7 +48,7 @@ BEGIN
 	FROM 
 		[dbo].[mcp_scenario] m
 	INNER JOIN 
-		FREETEXTTABLE([dbo].[mcp_scenario], (title, intent, keywords), @keywords, @top_n) ft
+		FREETEXTTABLE([dbo].[mcp_scenario], (*), @keywords, @top_n) ft
 			ON ft.[KEY] = m.scenario_code
 	ORDER BY 
 		ft.RANK DESC;

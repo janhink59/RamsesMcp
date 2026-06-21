@@ -3,43 +3,53 @@
 -- *
 -- * ARCHITEKTONICKÝ KONTEXT (PRO AI):
 -- * Tento skript definuje databázové struktury pro ukládání metadat komplexních reportů.
--- * Tyto tabulky jsou nezávislé na popisech agentických workflow (mcp_scenario).
--- * Slouží jako zdroj pravdy pro flexible_report.php, který na základě zde definovaných
--- * datových typů provádí striktní typovou kontrolu (Type Casting) předaných parametrů.
--- *
--- * VZTAH K OSTATNÍM VRSTVÁM:
--- * mcp_scenario definuje textový návod pro AI, kdy má uživateli nabídnout odkaz na report.
--- * mcp_report (tato tabulka) definuje technický kontrakt mezi MCP serverem a jádrem Ramses.
 -- =========================================================================================
 
-if not exists(select * from v_syscolumns where tabname='mcp_report' and colname='more_results') begin
-	execute dropni 'mcp_report_param'
-	execute dropni 'mcp_report'
-end
-
+-- Odstranění stávajících tabulek
+IF OBJECT_ID('mcp_report_columns', 'U') IS NOT NULL
+    DROP TABLE mcp_report_columns;
 GO
--- Tabulka definic samotných reportů
 
-IF OBJECT_ID('mcp_report') IS NULL
+IF OBJECT_ID('mcp_report_param', 'U') IS NOT NULL
+    DROP TABLE mcp_report_param;
+GO
+
+IF OBJECT_ID('mcp_report', 'U') IS NOT NULL
+    DROP TABLE mcp_report;
+GO
+
+-- Tabulka definic samotných reportů
 CREATE TABLE mcp_report (
-	report_code VARCHAR(50) CONSTRAINT pk_mcp_report PRIMARY KEY,
-	procedure_name varchar(40) not null,
-	is_generic bit default 1 not null,
-    more_results bit default 0 not null,
-	title NVARCHAR(200) NOT NULL,
-	description NVARCHAR(MAX) NULL,
+    report_code VARCHAR(50) CONSTRAINT pk_mcp_report PRIMARY KEY,
+    procedure_name VARCHAR(128) NOT NULL,
+    is_generic BIT DEFAULT 1 NOT NULL,
+    more_results BIT DEFAULT 0 NOT NULL,
+    title NVARCHAR(200) NOT NULL,
+    description NVARCHAR(MAX) NULL,
+    select_columns NVARCHAR(MAX) DEFAULT '*', -- Nový sloupec pro definici výběru (pouze pro Views)
+    order_by NVARCHAR(MAX) NULL               -- Nový sloupec pro řazení (pouze pro Views)
 );
 GO
+
 -- Tabulka definic parametrů reportů pro typovou validaci
-IF OBJECT_ID('mcp_report_param') IS NULL
 CREATE TABLE mcp_report_param (
-	report_code VARCHAR(50) NOT NULL CONSTRAINT fk_mcp_report_param_report REFERENCES mcp_report(report_code) ON DELETE CASCADE,
-	param_name VARCHAR(100) NOT NULL,
-	param_title NVARCHAR(100) NOT NULL DEFAULT '',
-	param_type VARCHAR(50) NOT NULL CONSTRAINT chk_mcp_report_param_type CHECK (param_type IN ('bit', 'tinyint', 'smallint', 'int', 'bigint', 'string', 'date', 'datetime', 'uuid')),
-	is_array BIT CONSTRAINT df_mcp_report_param_is_array DEFAULT 0 NOT NULL,
-	description NVARCHAR(500) NULL,
-	is_required BIT CONSTRAINT df_mcp_report_param_required DEFAULT 1 NOT NULL,
-	CONSTRAINT pk_mcp_report_param PRIMARY KEY (report_code, param_name)
+    report_code VARCHAR(50) NOT NULL,
+    param_name VARCHAR(100) NOT NULL,
+    param_title NVARCHAR(100) NOT NULL DEFAULT '',
+    param_type VARCHAR(50) NOT NULL CONSTRAINT chk_mcp_report_param_type CHECK (param_type IN ('bit', 'tinyint', 'smallint', 'int', 'bigint', 'string', 'date', 'datetime', 'uuid')),
+    is_array BIT DEFAULT 0 NOT NULL,
+    description NVARCHAR(500) NULL,
+    is_required BIT DEFAULT 1 NOT NULL,
+    CONSTRAINT pk_mcp_report_param PRIMARY KEY (report_code, param_name)
+);
+GO
+
+-- Tabulka pro aliasy sloupců (záhlaví reportů)
+-- report_code = '' (prázdný řetězec) znamená globální výchozí záznam pro všechny reporty
+CREATE TABLE mcp_report_columns (
+    report_code VARCHAR(50) NOT NULL DEFAULT '',
+    column_name VARCHAR(128) NOT NULL,
+    header_title NVARCHAR(255) NOT NULL,
+    CONSTRAINT pk_mcp_report_columns PRIMARY KEY (report_code, column_name)
 );
 GO

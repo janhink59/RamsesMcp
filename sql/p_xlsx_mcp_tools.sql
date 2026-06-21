@@ -14,6 +14,7 @@ as
 --execute debuglogin 'mcp_server'
 
 -- Smazání původních dat (zajištění idempotence pro bezpečné opakované spouštění)
+delete from mcp_report_columns
 delete from mcp_filter
 delete from mcp_tool_param
 delete from mcp_tool
@@ -86,13 +87,15 @@ WHERE
 -- =====================================================================
 -- 2. IMPORT REPORTŮ (MCP REPORTS)
 -- =====================================================================
-insert into mcp_report(report_code, title, procedure_name, description, is_generic, more_results)
+insert into mcp_report(report_code, title, procedure_name, description, is_generic, more_results, select_columns, order_by)
 select r.report_code
 	,r.title
 	,r.procedure_name
 	,r.description
 	,coalesce(r.is_generic,0)
 	,coalesce(r.more_results,0)
+	,r.select_columns
+	,r.order_by
 from XLSX_mcp_report$ r
 
 insert into mcp_report_param(report_code, param_name, param_title, param_type, is_array, description, is_required)
@@ -126,6 +129,15 @@ insert into mcp_filter(filter_code, free_text_description)
 select f.filter_code
 	,f.free_text_description
 from XLSX_mcp_filter$ f
+
+-- =====================================================================
+-- 5. IMPORT ALIASŮ SLOUPCŮ (MCP REPORT COLUMNS)
+-- =====================================================================
+insert into mcp_report_columns(report_code, column_name, header_title)
+select coalesce(c.report_code, '')  -- Pokud není kód zadán, stane se prázdným řetězcem (globální default)
+	,c.name
+	,c.header
+from XLSX_mcp_report_columns$ c
 
 GO
 --begin tran
