@@ -2,55 +2,106 @@
 GO
 
 /*
-	Specifický filtr: asset_class
-	ČISTĚ DATOVÁ VRSTVA: Pouze vrací data, veškerou logiku kolem 
-	ukládání identifikátorů a zpráv pro LLM řeší PHP orchestrátor.
+    Specifický filtr: asset_class
+    ČISTĚ DATOVÁ VRSTVA: Pouze vrací data, veškerou logiku kolem 
+    ukládání identifikátorů a zpráv pro LLM řeší PHP orchestrátor.
 */
 CREATE PROCEDURE mcp_filter_asset_class
-	@free_text NVARCHAR(MAX) = NULL,
-	@top_n INT = 10
+    @free_text varchar(8000) = NULL,
+    @top_n INT = 10
 AS
 BEGIN
-	SET NOCOUNT ON;
+    SET NOCOUNT ON;
 
-	-- 1. Validace
-	IF ISNULL(@free_text, '') = ''
-	BEGIN
-		-- Pokud pošleme sloupec "result", PHP to rozpozná jako zprávu a nezpracuje to jako data.
-		SELECT 'CHYBA: Pro filtr třídy aktiv musíte zadat hledaný text v parametru free_text.' AS result;
-		RETURN;
-	END
+    declare @l varchar(2)
+    declare @p bigint
+    select @p=crp_profile, @l=language from dbsession s where s.spid=@@spid
 
-	BEGIN TRY
-		-- 2. Nalezení nejlepších shod (Fuzzy Match)
-		DECLARE @BaseMatches TABLE (class_id BIGINT, max_child_id BIGINT);
+    -- 1. Validace
+    set @free_text=ISNULL(@free_text, '')
 
-		INSERT INTO @BaseMatches (class_id, max_child_id)
-		SELECT TOP 5 class_id, ISNULL(max_child_id, class_id)
-		FROM dbo.f_select_ast_cls()
-		WHERE dbo.f_fuzzy_match(@free_text, full_class_name) > 0.3
-		ORDER BY dbo.f_fuzzy_match(@free_text, full_class_name) DESC;
+    -- NÁVRAT K VAŠÍ BEZPEČNÉ STRATEGII: @search nikdy nebude prázdný, což chrání FREETEXTTABLE před pádem
+    declare @search varchar(8000) = @free_text + ' Nesmysl'
 
-		-- 3. Expanze kandidátů
-		DECLARE @Matches TABLE (row_idx INT IDENTITY(0,1), class_id BIGINT, class_name NVARCHAR(MAX));
+-- 1. Deklarace tabulkové proměnné včetně názvu (přesně podle vaší struktury)
+DECLARE @direct_matches TABLE (
+    crp_ast_cls BIGINT NOT NULL PRIMARY KEY,
+    class_id INT NOT NULL,
+    [name] NVARCHAR(255) NOT NULL, 
+    parent_class_id INT NULL,
+    [type] VARCHAR(1) NOT NULL,
+    leaf VARCHAR(1) NULL,
+    BaseRank INT NOT NULL
+);
 
-		INSERT INTO @Matches (class_id, class_name)
-		SELECT DISTINCT l.class_id, l.name
-		FROM dbo.f_select_ast_cls() l
-		INNER JOIN @BaseMatches b ON l.class_id BETWEEN b.class_id AND b.max_child_id
-		WHERE ISNULL(l.leaf, '') = 'Y';
+-- 2. Načtení všech dat jedním průchodem do paměti (včetně názvu)
+INSERT INTO @direct_matches (crp_ast_cls, class_id, [name], parent_class_id, [type], leaf, BaseRank)
+SELECT 
+    ac.crp_ast_cls,
+    ac.class_id,
+    ac.[name], 
+    ac.parent_class_id,
+    ac.[type],
+    ac.leaf,
+    CASE 
+        WHEN f.[KEY] IS NOT NULL THEN 
+            CASE 
+                WHEN ac.leaf = 'Y' AND f.[RANK] + 50 > 1000 THEN 1000
+                WHEN ac.leaf = 'Y' THEN f.[RANK] + 50
+                ELSE f.[RANK] 
+            END
+        ELSE 0 
+    END AS BaseRank
+FROM dbo.crp_ast_cls ac
+    LEFT OUTER JOIN FREETEXTTABLE(dbo.crp_ast_cls, name, @search) f ON ac.crp_ast_cls = f.[KEY]
+where ac.crp_profile=@p
+;
 
-		-- 4. Odeslání čistých dat (Orchestrátor už se o zbytek postará)
-		SELECT TOP (ISNULL(@top_n, 10))
-			'__block_name' = 'Nalezená data', 
-			class_id, 
-			class_name 
-		FROM @Matches 
-		ORDER BY row_idx;
+-- 3. Rekurze – pouze směrem DOLŮ (na podřízené prvky)
+;WITH Children AS (
+    -- Kombinace vaší ochrany a rekurzivní podmínky:
+    -- Pokud je text prázdný, 'Nesmysl' ve fulltextu nic nenašel (všechny řádky mají BaseRank = 0).
+    -- Podmínka (@free_text = '') ale propustí VŠECHNY řádky z @direct_matches a natvrdo jim nastaví rank 1000.
+    SELECT 
+        crp_ast_cls, 
+        class_id, 
+        parent_class_id, 
+        [type], 
+        leaf, 
+        CASE WHEN @free_text = '' THEN 1000 ELSE BaseRank END AS PropagatedRank
+    FROM @direct_matches 
+    WHERE (@free_text = '') OR (BaseRank > 0)
 
-	END TRY
-	BEGIN CATCH
-		SELECT 'CHYBA V LOGICE FILTRU ASSET_CLASS: ' + ERROR_MESSAGE() AS result;
-	END CATCH
+    UNION ALL
+
+    -- Rekurzivní krok DOLŮ: hledáme potomky (ac.parent_class_id = c.class_id)
+    SELECT 
+        ac.crp_ast_cls, 
+        ac.class_id, 
+        ac.parent_class_id, 
+        ac.[type], 
+        ac.leaf, 
+        (c.PropagatedRank * 80) / 100 
+    FROM @direct_matches ac
+    INNER JOIN Children c ON ac.parent_class_id = c.class_id AND ac.[type] = c.[type]
+    WHERE (c.PropagatedRank * 80) / 100 >= 1
+)
+
+-- 4. Finální sestavení výsledků – dotazujeme přímo rekurzi Children
+SELECT top(@top_n)
+    dm.crp_ast_cls,
+    dm.class_id,
+    dm.[name], 
+    dm.[type],
+    dm.leaf,
+    dm.parent_class_id,
+    MAX(ch.PropagatedRank) AS FinalRank
+FROM Children ch
+INNER JOIN @direct_matches dm ON dm.crp_ast_cls = ch.crp_ast_cls
+GROUP BY dm.crp_ast_cls, dm.class_id, dm.[name], dm.[type], dm.leaf, dm.parent_class_id
+ORDER BY FinalRank desc, class_id;
 END
+GO
+debuglogin 'hink'
+execute mcp_filter_asset_class ''
 GO
