@@ -13,6 +13,8 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+	if @top_n is null or @top_n<1 set @top_n=1000
+
     declare @l varchar(2)
     declare @p bigint
     select @p=crp_profile, @l=language from dbsession s where s.spid=@@spid
@@ -39,23 +41,24 @@ INSERT INTO @direct_matches (crp_ast_cls, class_id, [name], parent_class_id, [ty
 SELECT 
     ac.crp_ast_cls,
     ac.class_id,
-    ac.[name], 
+    case when acl.name<>'' then acl.name else ac.name end name, 
     ac.parent_class_id,
     ac.[type],
     ac.leaf,
     CASE 
-        WHEN f.[KEY] IS NOT NULL THEN 
-            CASE 
-                WHEN ac.leaf = 'Y' AND f.[RANK] + 50 > 1000 THEN 1000
-                WHEN ac.leaf = 'Y' THEN f.[RANK] + 50
-                ELSE f.[RANK] 
-            END
-        ELSE 0 
+		when lf.rank>0 then lf.rank
+		WHEN f.rank>0 then f.rank
+		ELSE 0
     END AS BaseRank
 FROM dbo.crp_ast_cls ac
-    LEFT OUTER JOIN FREETEXTTABLE(dbo.crp_ast_cls, name, @search) f ON ac.crp_ast_cls = f.[KEY]
+	left outer join l_ast_cls acl on acl.crp_ast_cls=ac.crp_ast_cls and acl.language=@l and acl.name<>''		
+    LEFT OUTER JOIN FREETEXTTABLE(crp_ast_cls, name, @search) f ON ac.crp_ast_cls = f.[KEY]
+	left outer join freetexttable(l_ast_cls,name,@search) lf on lf.[KEY]=acl.fulltext_key
 where ac.crp_profile=@p
 ;
+
+update @direct_matches set BaseRank=BaseRank+50
+where BaseRank>0 and leaf='Y'
 
 -- 3. Rekurze – pouze směrem DOLŮ (na podřízené prvky)
 ;WITH Children AS (
@@ -100,8 +103,9 @@ FROM Children ch
 INNER JOIN @direct_matches dm ON dm.crp_ast_cls = ch.crp_ast_cls
 GROUP BY dm.crp_ast_cls, dm.class_id, dm.[name], dm.[type], dm.leaf, dm.parent_class_id
 ORDER BY FinalRank desc, class_id;
+
 END
 GO
-debuglogin 'hink'
-execute mcp_filter_asset_class ''
+--debuglogin 'hink'
+--execute mcp_filter_asset_class 'server cloudový',2000
 GO
