@@ -5,7 +5,7 @@ declare(strict_types=1);
  * RamsesMcp - mcp_report_generic.php
  * * Generický vykreslovač reportů. Zpracovává zobrazení reportů, které nemají
  * vlastní custom proxy skript. Výsledky čte buď jako `EXEC procedura`,
- * `SELECT [sloupce] FROM view WHERE... ORDER BY...` nebo `SELECT [sloupce] FROM funkcia(...)`
+ * `SELECT [sloupce] FROM view WHERE... ORDER BY...` nebo `SELECT [sloupce] FROM funkcia(...) ORDER BY...`
  * (zohledňuje parametry z $_POST).
  */
 
@@ -117,8 +117,15 @@ if (strpos(strtoupper($objType), 'VIEW') !== false || strpos(strtoupper($objType
 			}
 		}
 	}
-	// U funkcí order_by ignorujeme (není aplikovatelné), ale select_columns aplikujeme
+	
+	// Sestavíme dotaz s aplikovaným select_columns
 	$sql = "SELECT {$selectCols} FROM " . $procName . "(" . implode(", ", $funcArgs) . ")";
+	
+	// Aplikujeme order_by i na funkci
+	if ($orderBy !== '') {
+		$sql .= " ORDER BY " . $orderBy;
+	}
+	
 } else {
 	// ULOŽENÁ PROCEDURA: O parametry se postará sám SQL Server skrz aktuální @@SPID a kontext
 	$sql = "SET NOCOUNT ON;\nEXEC " . $procName;
@@ -230,7 +237,7 @@ if ($dbquery !== false && $dbquery !== 1) {
 		
 		.debug-sql { margin-top: 2rem; font-size: 0.85rem; color: #718096; }
 		.debug-sql summary { cursor: pointer; padding: 5px; font-weight: bold; }
-		.debug-sql pre { background: #2d3748; color: #e2e8f0; padding: 15px; border-radius: 6px; overflow-x: auto; font-family: 'Cascadia Code', monospace; }
+		.debug-sql pre { background: #2d3748; color: #e2e8f0; padding: 15px; border-radius: 6px; overflow-x: auto; font-family: 'Cascadia Code', monospace; tab-size: 4; }
 	</style>
 </head>
 <body>
@@ -244,7 +251,7 @@ if ($dbquery !== false && $dbquery !== 1) {
 		
 		<details class="debug-sql">
 			<summary>Zobrazit vykonaný T-SQL dotaz</summary>
-			<pre><?php echo htmlspecialchars($sql); ?></pre>
+			<pre><code><?php echo htmlspecialchars($sql); ?></code></pre>
 		</details>
 	</div>
 </body>

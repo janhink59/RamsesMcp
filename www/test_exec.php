@@ -6,14 +6,6 @@ declare(strict_types=1);
  * * * ARCHITEKTONICKÝ KONTEXT (PRO AI):
  * Tento soubor slouží jako asynchronní (AJAX) brána pro spouštění testů 
  * přímo z dashboardu info.php. 
- * * * KRITICKÁ ZÁVISLOST (ROUTING):
- * Tento skript je navržen tak, aby byl inkludován z index.php v režimu '?mode=test'.
- * Pokud by byl volán přímo (test_exec.php), selže, protože nebude mít přístup 
- * k naplněné globální proměnné $config ani k nastaveným include cestám.
- * * * IDENTITY FLOW:
- * Skript přebírá identitu (uživatele/heslo/server) z globálního $config, 
- * což znamená, že testy běží přesně pod tím kontextem, který je aktuálně 
- * nastaven v prohlížeči (včetně případných X-Mcp-* hlaviček).
  */
 
 require_once __DIR__ . '/db_interface.php';
@@ -28,7 +20,6 @@ try {
 		throw new Exception("Konfigurace MCP nebyla nalezena.");
 	}
 
-	// Používáme standardní klíče 'user' a 'password' z naší šablony
 	$user = $config['mcp']['user'] ?? '';
 	$pass = $config['mcp']['password'] ?? '';
 	$ip   = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -37,10 +28,10 @@ try {
 		throw new Exception("V konfiguraci chybí přihlašovací údaje (user/password).");
 	}
 
-	// 1. Inicializace DBI (využívá globální $config)
+	// 1. Inicializace DBI
 	$dbi = new db_interface();
 	
-	// 2. Nastavení kontextu v DB (set_login)
+	// 2. Nastavení kontextu v DB
 	$dbi->authenticate($user, $pass, $ip);
 
 	// 3. Vykonání nástroje
@@ -59,18 +50,64 @@ try {
 	
 	$jsonString = json_encode($jsonRpcResponse, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-	// 6. Vrácení výsledku s vertikálním řazením a omezením šířky
-	echo "<div style='display: flex; flex-direction: column; gap: 20px; margin-top: 15px; max-width: 100%; box-sizing: border-box;'>\n";
+	// 6. Vykreslení výsledku s AGRESIVNÍM CSS gridem
+	echo "<style>
+		/* 1. Neprůstřelný Grid, který zamezí roztahování mimo viewport rodiče */
+		.mcp-test-root {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+			gap: 20px;
+			margin-top: 15px;
+			width: 100%;
+		}
+		
+		/* 2. Obal pro tabulku s vynuceným overflow */
+		.mcp-test-table-wrap {
+			background: #fdfdfd;
+			padding: 15px;
+			border: 1px solid #e2e8f0;
+			border-radius: 8px;
+			width: 100%;
+			overflow-x: auto; /* Zde se objeví scrollbar */
+		}
+		
+		/* 3. Agresivní zkrocení samotné tabulky (přebije RamsesLib atributy) */
+		.mcp-test-table-wrap table {
+			width: max-content !important; /* Šířka pouze podle obsahu textu */
+			max-width: none !important;
+			table-layout: auto !important;
+			border-collapse: collapse !important;
+		}
+		
+		/* 4. Zkrocení buněk tabulky */
+		.mcp-test-table-wrap th, 
+		.mcp-test-table-wrap td {
+			white-space: nowrap !important; /* Zakáže lámání textu do více řádků */
+			width: auto !important;         /* Zruší historické width=\"100\" apod. */
+		}
+		
+		/* 5. Obal pro JSON */
+		.mcp-test-json-wrap {
+			background: #fdfdfd;
+			padding: 15px;
+			border: 1px solid #e2e8f0;
+			border-radius: 8px;
+			width: 100%;
+			overflow-x: auto;
+		}
+	</style>\n";
+
+	// Hlavní kontejner
+	echo "<div class='mcp-test-root'>\n";
 	
 	// Horní sekce: HTML tabulka
-	echo "\t<div style='background: #fdfdfd; padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; box-sizing: border-box; overflow-x: auto;'>\n";
+	echo "\t<div class='mcp-test-table-wrap'>\n";
 	echo "\t\t<h4 style='margin-top: 0; color: #2d3748; border-bottom: 1px solid #edf2f7; padding-bottom: 8px;'>Vizuální kontrola (HTML)</h4>\n";
 	echo "\t\t" . $htmlTable . "\n";
 	echo "\t</div>\n";
 	
 	// Spodní sekce: Surový JSON (Payload pro AI)
-	// Zde je klíčová změna: přidáno white-space: pre-wrap; a word-wrap: break-word;
-	echo "\t<div style='background: #fdfdfd; padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; box-sizing: border-box;'>\n";
+	echo "\t<div class='mcp-test-json-wrap'>\n";
 	echo "\t\t<h4 style='margin-top: 0; color: #2d3748; border-bottom: 1px solid #edf2f7; padding-bottom: 8px;'>Surový Payload pro AI (JSON-RPC)</h4>\n";
 	echo "\t\t<pre style='background: #1a202c; color: #e2e8f0; padding: 15px; border-radius: 8px; font-family: \"Cascadia Code\", monospace; font-size: 0.85rem; tab-size: 4; margin-bottom: 0; white-space: pre-wrap; word-wrap: break-word;'><code>" . htmlspecialchars($jsonString) . "</code></pre>\n";
 	echo "\t</div>\n";
