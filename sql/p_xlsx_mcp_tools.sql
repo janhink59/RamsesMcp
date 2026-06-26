@@ -2,7 +2,7 @@ execute dropni 'p_xlsx_mcp_tools'
 GO
 /*
 	Standardní import dat z Excelu (Knowledge Base)
-	Zajišťuje plný import nástrojů, reportů, agentických scénářů a filtrů z jednoho zdroje.
+	Zajišťuje plný import nástrojů, reportů, agentických scénářů a výběrů z jednoho zdroje.
 
 	execute p_drop_excel_tables
 
@@ -15,7 +15,7 @@ as
 
 -- Smazání původních dat (zajištění idempotence pro bezpečné opakované spouštění)
 delete from mcp_report_columns
-delete from mcp_filter
+delete from mcp_select
 delete from mcp_tool_param
 delete from mcp_tool
 delete from mcp_scenario
@@ -123,12 +123,12 @@ select s.scenario_code
 from XLSX_mcp_scenario$ s
 
 -- =====================================================================
--- 4. IMPORT FILTRŮ (MCP FILTERS)
+-- 4. IMPORT VÝBĚRŮ (MCP SELECT)
 -- =====================================================================
-insert into mcp_filter(filter_code, free_text_description)
-select f.filter_code
-	,f.free_text_description
-from XLSX_mcp_filter$ f
+insert into mcp_select(select_code, free_text_description)
+select s.select_code
+	,s.free_text_description
+from XLSX_mcp_select$ s
 
 -- =====================================================================
 -- 5. IMPORT ALIASŮ SLOUPCŮ (MCP REPORT COLUMNS)

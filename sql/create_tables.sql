@@ -12,33 +12,34 @@ if not exists(select * from v_syscolumns where tabname = 'mcp_tool' and colname=
 	or not exists(select * from v_syscolumns where tabname = 'mcp_report' and colname='more_results')
 
 begin
-    execute dropni 'mcp_tool_param'
-    execute dropni 'mcp_tool'
-    execute dropni 'mcp_report_param'
-    execute dropni 'mcp_report'
+	execute dropni 'mcp_tool_param'
+	execute dropni 'mcp_tool'
+	execute dropni 'mcp_report_param'
+	execute dropni 'mcp_report'
 end
 GO
+
 -- Tabulka nástrojů
 if object_id('mcp_tool') is null
 CREATE TABLE mcp_tool (
-    mcp_tool UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-    name VARCHAR(100) NOT NULL UNIQUE,
+	mcp_tool UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+	name VARCHAR(100) NOT NULL UNIQUE,
 	title varchar(100) default '' not null,
 	is_generic bit default 1 not null,
-    more_results bit default 0 not null,
-    description VARCHAR(MAX) NOT NULL
+	more_results bit default 0 not null,
+	description VARCHAR(MAX) NOT NULL
 );
 
 -- Tabulka parametrů
 if object_id('mcp_tool_param') is null
 CREATE TABLE mcp_tool_param (
-    mcp_tool UNIQUEIDENTIFIER NOT NULL /* references mcp_tool on delete cascade */,
-    param_name VARCHAR(100) NOT NULL,
+	mcp_tool UNIQUEIDENTIFIER NOT NULL /* references mcp_tool on delete cascade */,
+	param_name VARCHAR(100) NOT NULL,
 	param_title varchar(100) default '' not null,
-    param_type VARCHAR(50) NOT NULL, -- "string", "number", "uuid"
-    description VARCHAR(MAX),
-    is_required BIT DEFAULT 1,
-    primary key (mcp_tool, param_name)
+	param_type VARCHAR(50) NOT NULL, -- "string", "number", "uuid"
+	description VARCHAR(MAX),
+	is_required BIT DEFAULT 1,
+	primary key (mcp_tool, param_name)
 );
 
 -- Tabulka pro logování MCP requestů a odpovědí
@@ -56,23 +57,29 @@ CREATE TABLE mcp_log (
 
 if object_id('mcp_scenario') is null
 CREATE TABLE mcp_scenario (
-    scenario_code VARCHAR(50) constraint pk_scenario_code PRIMARY KEY,
-    title NVARCHAR(200) NOT NULL,
-    intent NVARCHAR(500) NOT NULL,
-    keywords NVARCHAR(500) NOT NULL,
-    when_to_use NVARCHAR(500) NULL,
-    when_not_to_use NVARCHAR(500) NULL,
-    instructions NVARCHAR(MAX) NOT NULL
+	scenario_code VARCHAR(50) constraint pk_scenario_code PRIMARY KEY,
+	title NVARCHAR(200) NOT NULL,
+	intent NVARCHAR(500) NOT NULL,
+	keywords NVARCHAR(500) NOT NULL,
+	when_to_use NVARCHAR(500) NULL,
+	when_not_to_use NVARCHAR(500) NULL,
+	instructions NVARCHAR(MAX) NOT NULL
 );
 GO
-IF OBJECT_ID('mcp_filter', 'U') is null
+
+-- Odstranění původní tabulky mcp_filter, aby nezůstávala v DB
+IF OBJECT_ID('mcp_filter', 'U') is not null
+	DROP TABLE mcp_filter;
+GO
+
+IF OBJECT_ID('mcp_select', 'U') is null
 /*
-	Tabulka mcp_filter
-	Slouží jako číselník a metadata pro chytré filtry (Smart Tools).
-	Data se plní primárně importem z Excelu (list mcp_filter).
+	Tabulka mcp_select
+	Slouží jako číselník a metadata pro chytré výběry (Smart Tools / nástroj select).
+	Data se plní primárně importem z Excelu (list mcp_select).
 */
-CREATE TABLE mcp_filter (
-	filter_code				VARCHAR(100) NOT NULL PRIMARY KEY,	-- Unikátní identifikátor filtru (např. 'asset_class')
+CREATE TABLE mcp_select (
+	select_code				VARCHAR(100) NOT NULL PRIMARY KEY,	-- Unikátní identifikátor výběru (např. 'asset_class')
 	free_text_description	NVARCHAR(MAX) NULL					-- Instrukce/popis pro LLM, co má uživatel zadat
 );
 GO

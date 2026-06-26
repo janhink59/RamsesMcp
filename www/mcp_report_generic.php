@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /**
  * RamsesMcp - mcp_report_generic.php
- * * Generický vykreslovač reportů. Zpracovává zobrazení reportů, které nemají
+ * Generický vykreslovač reportů. Zpracovává zobrazení reportů, které nemají
  * vlastní custom proxy skript. Výsledky čte buď jako `EXEC procedura`,
  * `SELECT [sloupce] FROM view WHERE... ORDER BY...` nebo `SELECT [sloupce] FROM funkcia(...) ORDER BY...`
  * (zohledňuje parametry z $_POST).
@@ -26,7 +26,9 @@ if ($stmtProc && sqlsrv_has_rows($stmtProc)) {
 	$rowProc = sqlsrv_fetch_array($stmtProc, SQLSRV_FETCH_ASSOC);
 	$procName = trim((string)$rowProc['procedure_name']);
 	$selectCols = trim((string)$rowProc['select_columns']);
-	if ($selectCols === '') $selectCols = '*';
+	if ($selectCols === '') {
+		$selectCols = '*';
+	}
 	$orderBy = trim((string)$rowProc['order_by']);
 }
 if ($procName === '') {
@@ -128,7 +130,7 @@ if (strpos(strtoupper($objType), 'VIEW') !== false || strpos(strtoupper($objType
 	
 } else {
 	// ULOŽENÁ PROCEDURA: O parametry se postará sám SQL Server skrz aktuální @@SPID a kontext
-	$sql = "SET NOCOUNT ON;\nEXEC " . $procName;
+	$sql = "SET NOCOUNT ON;\n\tEXEC " . $procName;
 }
 
 // 4. Vykonání dotazu (navázání na RamsesLib.php)
@@ -208,6 +210,12 @@ if ($dbquery !== false && $dbquery !== 1) {
 	}
 } else {
 	$htmlTables .= "<div class='error-msg'>Při vykonávání dotazu došlo k chybě. Otevřete log pro detaily.</div>\n";
+}
+
+// Před zahájením HTML výstupu vyčistíme případný buffer, aby chybová hlášení (Notice/Warning) 
+// nenarušila JSON-RPC odpověď nadřazeného skriptu směrem k MCP klientovi.
+if (ob_get_level() > 0) {
+	ob_clean();
 }
 ?>
 <!DOCTYPE html>

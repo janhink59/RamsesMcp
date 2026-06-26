@@ -1,36 +1,36 @@
 ﻿execute dropni 'mcp_tool_set_filter'
-GO
 execute dropni 'mcp_tool_select'
 GO
 
 /*
 	Nástroj: select (Generický MCP Tool - Dispečer / Fasáda)
-	Účel:    Přijímá požadavek od LLM a dynamicky volá specifické agendy/filtry.
+	Účel:    Přijímá požadavek od LLM a dynamicky volá specifické agendy/výběry.
 	         Parametry @save_as a @save_only se sem z PHP vůbec nedostanou!
 */
 CREATE PROCEDURE mcp_tool_select
-	@filter_code	VARCHAR(100),           
+	@select_code	VARCHAR(100),           
 	@free_text		NVARCHAR(MAX) = NULL,   
 	@top_n			INT = NULL
 AS
 BEGIN
 	SET NOCOUNT ON;
 
-	SET @filter_code = LTRIM(RTRIM(ISNULL(@filter_code, '')));
+	SET @select_code = LTRIM(RTRIM(ISNULL(@select_code, '')));
 	SET @free_text = LTRIM(RTRIM(ISNULL(@free_text, '')));
 
-	IF @filter_code = ''
+	IF @select_code = ''
 	BEGIN
-		SELECT 'CHYBA: Parametr filter_code (kód entity) je povinný.' AS result;
+		SELECT 'CHYBA: Parametr select_code (kód entity) je povinný.' AS result;
 		RETURN;
 	END
 
-	DECLARE @proc_name NVARCHAR(128) = N'dbo.mcp_filter_' + @filter_code;
+	-- Změna prefixu volaných procedur na mcp_select_
+	DECLARE @proc_name NVARCHAR(128) = N'dbo.mcp_select_' + @select_code;
 
-	-- Kontrola, zda požadovaný filter/agenda na serveru vůbec existuje
+	-- Kontrola, zda požadovaný výběr/agenda na serveru vůbec existuje
 	IF OBJECT_ID(@proc_name, 'P') IS NULL
 	BEGIN
-		SELECT 'CHYBA: Entita s kódem ''' + @filter_code + ''' aktuálně není na serveru implementována (chybí procedura ' + @proc_name + ').' AS result;
+		SELECT 'CHYBA: Entita s kódem ''' + @select_code + ''' aktuálně není na serveru implementována (chybí procedura ' + @proc_name + ').' AS result;
 		RETURN;
 	END
 

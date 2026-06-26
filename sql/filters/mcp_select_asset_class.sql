@@ -1,12 +1,13 @@
 ﻿execute dropni 'mcp_filter_asset_class'
+execute dropni 'mcp_select_asset_class'
 GO
 
 /*
-    Specifický filtr: asset_class
+    Specifický výběr: asset_class
     ČISTĚ DATOVÁ VRSTVA: Pouze vrací data, veškerou logiku kolem 
     ukládání identifikátorů a zpráv pro LLM řeší PHP orchestrátor.
 */
-CREATE PROCEDURE mcp_filter_asset_class
+CREATE PROCEDURE mcp_select_asset_class
     @free_text varchar(8000) = NULL,
     @top_n INT = 10
 AS
@@ -107,5 +108,5 @@ ORDER BY FinalRank desc, class_id;
 END
 GO
 --debuglogin 'hink'
---execute mcp_filter_asset_class 'server cloudový',2000
+--execute mcp_select_asset_class 'server cloudový',2000
 GO

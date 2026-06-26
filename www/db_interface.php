@@ -211,9 +211,9 @@ class db_interface {
 		// Vytažení a výchozí nastavení parametru save_only (implicitně 0 = plná data)
 		$saveOnly   = isset($execParams['save_only']) ? (int)$execParams['save_only'] : 0;
 		
-		// Fallback: Pokud jde o dispečer filtrů a nebylo řečeno kam uložit, uložíme to pod názvem filtru
-		if (strtolower($tool_name) === 'set_filter' && empty($saveAs) && !empty($execParams['filter_code'])) {
-			$saveAs = trim((string)$execParams['filter_code']);
+		// OPRAVENÝ Fallback: Pokud jde o dispečer výběrů a nebylo řečeno kam uložit, uložíme to pod kódovým názvem výběru
+		if (strtolower($tool_name) === 'select' && empty($saveAs) && !empty($execParams['select_code'])) {
+			$saveAs = trim((string)$execParams['select_code']);
 		}
 		
 		foreach ($toolDefs as $def) {

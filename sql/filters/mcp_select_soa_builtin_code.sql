@@ -1,13 +1,14 @@
 ﻿execute dropni 'mcp_filter_soa'
 execute dropni 'mcp_filter_soa_builtin_code'
+execute dropni 'mcp_select_soa_builtin_code'
 GO
 /*
-	Nástroj: mcp_filter_soa
+	Nástroj: mcp_select_soa_builtin_code
 	Popis:   Vyhledá dostupný SoA předpis v pohledu v_repo_regulation.
 	         ČISTÁ DATOVÁ VRSTVA: Pouze vrací data, veškerou logiku kolem 
 	         ukládání identifikátorů a zpráv pro LLM řeší PHP orchestrátor.
 */
-CREATE PROCEDURE mcp_filter_soa_builtin_code
+CREATE PROCEDURE mcp_select_soa_builtin_code
 	@free_text	varchar(8000),
 	@top_n		INT = 10
 AS
@@ -67,5 +68,5 @@ BEGIN
 END
 GO
 --debuglogin 'hink'
---execute mcp_filter_soa_builtin_code 'cloud'
+--execute mcp_select_soa_builtin_code 'cloud'
 GO
