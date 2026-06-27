@@ -73,14 +73,24 @@ IF OBJECT_ID('mcp_filter', 'U') is not null
 	DROP TABLE mcp_filter;
 GO
 
+if not exists(select * from v_syscolumns where tabname='mcp_select' and colname='order_by')
+	execute dropni 'mcp_select'
+GO
 IF OBJECT_ID('mcp_select', 'U') is null
 /*
 	Tabulka mcp_select
 	Slouží jako číselník a metadata pro chytré výběry (Smart Tools / nástroj select).
 	Data se plní primárně importem z Excelu (list mcp_select).
 */
-CREATE TABLE mcp_select (
-	select_code				VARCHAR(100) NOT NULL PRIMARY KEY,	-- Unikátní identifikátor výběru (např. 'asset_class')
-	free_text_description	NVARCHAR(MAX) NULL					-- Instrukce/popis pro LLM, co má uživatel zadat
+CREATE TABLE dbo.mcp_select (
+    select_code           VARCHAR(50)   NOT NULL,
+    description           NVARCHAR(255) NULL,
+    use_free_text         BIT           NOT NULL CONSTRAINT DF_mcp_select_use_free_text DEFAULT 0,
+    free_text_description NVARCHAR(1000) NULL,
+    procedure_name        VARCHAR(128)  NULL,
+    select_columns        NVARCHAR(MAX) NULL, -- Nový sloupec pro explicitní definici sloupců
+    order_by              NVARCHAR(MAX) NULL, -- Nový sloupec pro výchozí řazení
+    
+    CONSTRAINT pk_mcp_select PRIMARY KEY CLUSTERED (select_code)
 );
 GO

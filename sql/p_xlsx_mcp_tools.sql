@@ -128,9 +128,14 @@ from XLSX_mcp_scenario$ s
 -- =====================================================================
 -- 4. IMPORT VÝBĚRŮ (MCP SELECT)
 -- =====================================================================
-insert into mcp_select(select_code, free_text_description)
+insert into mcp_select(select_code, description, use_free_text, free_text_description, procedure_name, select_columns, order_by)
 select s.select_code
+	,s.description
+	,coalesce(s.use_free_text,0)
 	,s.free_text_description
+	,s.procedure_name
+	,s.select_columns
+	,s.order_by
 from XLSX_mcp_select$ s
 
 -- =====================================================================

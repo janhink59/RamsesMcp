@@ -44,14 +44,18 @@ BEGIN
 		m.title, 
 		m.intent, 
 		m.when_to_use, 
-		m.when_not_to_use
+		m.when_not_to_use,
+		ft.rank
 	FROM 
 		[dbo].[mcp_scenario] m
-	INNER JOIN 
+	INNER HASH JOIN 
 		FREETEXTTABLE([dbo].[mcp_scenario], (*), @keywords, @top_n) ft
 			ON ft.[KEY] = m.scenario_code
 	ORDER BY 
 		ft.RANK DESC;
 
 END
+GO
+--debuglogin 'hink'
+--execute mcp_tool_find_system_workflow 'chci číselníků dopadů'
 GO
