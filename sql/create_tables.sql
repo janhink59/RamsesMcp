@@ -8,7 +8,7 @@
 execute p_drop_excel_tables
 GO
 -- Zde se odstraní tabulky, které byly změměny
-if not exists(select * from v_syscolumns where tabname = 'mcp_tool' and colname='more_results')
+if not exists(select * from v_syscolumns where tabname = 'mcp_tool_param' and colname='sort_order')
 	or not exists(select * from v_syscolumns where tabname = 'mcp_report' and colname='more_results')
 
 begin
@@ -35,6 +35,7 @@ if object_id('mcp_tool_param') is null
 CREATE TABLE mcp_tool_param (
 	mcp_tool UNIQUEIDENTIFIER NOT NULL /* references mcp_tool on delete cascade */,
 	param_name VARCHAR(100) NOT NULL,
+	sort_order INT DEFAULT 0 NOT NULL, -- <--- PRO VIZUÁLNÍ ŘAZENÍ PARAMETRŮ V UI
 	param_title varchar(100) default '' not null,
 	param_type VARCHAR(50) NOT NULL, -- "string", "number", "uuid"
 	description VARCHAR(MAX),

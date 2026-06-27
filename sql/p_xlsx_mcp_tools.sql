@@ -34,9 +34,10 @@ select hashbytes('MD5',N'mcp_tool.'+t.name)
 	,coalesce(t.more_results,0)
 from XLSX_mcp_tool$ t
 
-insert into mcp_tool_param(mcp_tool,param_name,param_title,param_type,description,is_required)
+insert into mcp_tool_param(mcp_tool,param_name,sort_order,param_title,param_type,description,is_required)
 select hashbytes('MD5',N'mcp_tool.'+p.name)
 	,p.param_name
+	,coalesce(p.sort_order,0) -- <--- NAČTENÍ HODNOTY DO SORT_ORDER
 	,p.param_title
 	,p.param_type
 	,p.description
@@ -45,10 +46,11 @@ from XLSX_mcp_tool_param$ p
 	join mcp_tool t on t.mcp_tool=hashbytes('MD5',N'mcp_tool.'+p.name)
 
 -- Přidání globálního parametru 'save_as' ke všem generickým nástrojům
-INSERT INTO mcp_tool_param (mcp_tool, param_name, param_title, param_type, description, is_required)
+INSERT INTO mcp_tool_param (mcp_tool, param_name, sort_order, param_title, param_type, description, is_required)
 SELECT 
 	t.mcp_tool, 
 	'save_as', 
+	98, -- <--- PEVNÉ SEŘAZENÍ NA KONEC
 	'Uložit výsledek (Alias)', 
 	'string', 
 	'Volitelný parametr. Zadejte textový alias (pouze malá písmena, číslice a podtržítko), pokud chcete získaná data uložit do dočasné paměti místo jejich vypsání. Použijte, pokud se chystáte předat data jinému nástroji.', 
@@ -65,10 +67,11 @@ WHERE
 	);
 
 -- PŘIDÁNÍ GLOBÁLNÍHO PARAMETRU 'save_only' KE VŠEM GENERICKÝM NÁSTROJŮM
-INSERT INTO mcp_tool_param (mcp_tool, param_name, param_title, param_type, description, is_required)
+INSERT INTO mcp_tool_param (mcp_tool, param_name, sort_order, param_title, param_type, description, is_required)
 SELECT 
 	t.mcp_tool, 
 	'save_only', 
+	99, -- <--- PEVNÉ SEŘAZENÍ ÚPLNĚ NA KONEC AŽ ZA SAVE_AS
 	'Pouze uložit (bez detailního výpisu dat)', 
 	'int', 
 	'Volitelný parametr (0 nebo 1). Pokud pošleš 1, nástroj ti nevrátí obsáhlá data, ale pouze potvrdí jejich uložení na pozadí. Pokud pošleš 0, vrátí ti detailní seznam záznamů k prozkoumání.', 

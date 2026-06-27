@@ -11,7 +11,7 @@ declare(strict_types=1);
  *
  * ZÁVISLOSTI NA DB SCHÉMATU (Očekávaná struktura):
  * - Tabulka `mcp_tool`: Metadata nástrojů (sloupce: mcp_tool, name, title, description, is_generic)
- * - Tabulka `mcp_tool_param`: Definice parametrů (sloupce: param_name, param_type, is_required)
+ * - Tabulka `mcp_tool_param`: Definice parametrů (sloupce: param_name, param_type, is_required, sort_order)
  * - Tabulka `mcp_log`: Audit log (sloupce: request_id, method, payload_in, duration_ms, error_flag)
  * - Tabulka `mcp_saved_values`: Dočasné tabulky s hodnotami pole (sloupce: wwwsession, save_as, row_index, saved_data)
  *
@@ -74,10 +74,11 @@ class db_interface {
 	 */
 	private function loadToolsFromDatabase(): void {
 		$sql = "SELECT t.mcp_tool, t.name, t.title AS tool_title, t.description AS tool_desc, t.is_generic,
-					   p.param_name, p.param_title, p.param_type, p.description AS param_desc, p.is_required
+					   p.param_name, p.param_title, p.param_type, p.description AS param_desc, p.is_required,
+					   p.sort_order
 				FROM mcp_tool t
 				LEFT JOIN mcp_tool_param p ON t.mcp_tool = p.mcp_tool
-				ORDER BY t.name";
+				ORDER BY t.name ASC, p.sort_order ASC, p.param_name ASC";
 
 		$query = sqlsrv_query($this->db, $sql);
 		

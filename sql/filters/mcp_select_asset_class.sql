@@ -93,7 +93,7 @@ where BaseRank>0 and leaf='Y'
 
 -- 4. Finální sestavení výsledků – dotazujeme přímo rekurzi Children
 SELECT top(@top_n)
-    dm.crp_ast_cls,
+    --dm.crp_ast_cls,
     dm.class_id,
     dm.[name], 
     dm.[type],
