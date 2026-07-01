@@ -16,6 +16,7 @@ declare(strict_types=1);
  * 1. Ověřit nízkoúrovňové připojení k databázi (sqlsrv).
  * 2. Ověřit aplikační přihlášení (set_login) pro uživatele definovaného v configu.
  * 3. Vylistovat dostupné MCP nástroje z DB a nabídnout formuláře pro jejich otestování.
+ * 4. Ověřit dostupnost vektorizačního serveru (Ollama API).
  */
 
 header('Content-Type: text/html; charset=utf-8');
@@ -60,6 +61,52 @@ try {
 	$tools    = [];
 	$params   = [];
 }
+
+// TEST OLLAMA API (Vektorizační server - VPN Workaround)
+$ollamaUrl = rtrim($config['mcp']['ollama_url'] ?? 'http://localhost:11434', '/');
+$ollamaStatus = "❓ Probíhá test...";
+$ollamaClass = "";
+
+if (!empty($ollamaUrl)) {
+	// Místo cURL použijeme nativní stream wrapper, který lépe snáší VPN adaptéry na Windows
+	$context = stream_context_create([
+		'http' => [
+			'timeout' => 5, // 5 sekund timeout
+			'ignore_errors' => true // abychom zachytili i chybové HTTP kódy
+		]
+	]);
+
+	$apiUrl = $ollamaUrl . '/api/version';
+	
+	// Potlačíme nativní warning a odchytíme ho ručně
+	$response = @file_get_contents($apiUrl, false, $context);
+
+	if ($response !== false) {
+		// Pokus o parsování HTTP kódu ze systémové proměnné $http_response_header
+		$httpCode = 200;
+		if (isset($http_response_header) && is_array($http_response_header)) {
+			if (preg_match('#HTTP/[0-9\.]+\s+([0-9]+)#', $http_response_header[0], $out)) {
+				$httpCode = intval($out[1]);
+			}
+		}
+
+		if ($httpCode === 200) {
+			$apiData = json_decode($response, true);
+			$ollamaStatus = "✅ OK - Připojeno (Verze: " . htmlspecialchars($apiData['version'] ?? 'neznámá') . ") [via stream]";
+			$ollamaClass = "ok";
+		} else {
+			$ollamaStatus = "❌ Nedostupné - Server odpověděl HTTP " . $httpCode;
+			$ollamaClass = "error";
+		}
+	} else {
+		// Pokud selže i spojení na síťové vrstvě
+		$errorMsg = error_get_last()['message'] ?? 'Neznámá síťová chyba přes VPN';
+		// Vyčistíme text chyby od zbytečné omáčky PHP
+		$cleanError = preg_replace('/^file_get_contents\(.*?\): /', '', $errorMsg);
+		$ollamaStatus = "❌ Nedostupné - " . htmlspecialchars($cleanError);
+		$ollamaClass = "error";
+	}
+}
 ?>
 <!DOCTYPE html>
 <html lang="cs">
@@ -75,7 +122,7 @@ try {
 		
 		/* Optimalizovaný diagnostický box pro úsporu místa */
 		.status-box { padding: 8px 12px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; line-height: 1.3; }
-		.status-box p { margin: 2px 0; font-size: 0.95rem; }
+		.status-box p { margin: 4px 0; font-size: 0.95rem; }
 		
 		table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
 		th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid #edf2f7; vertical-align: top; }
@@ -137,7 +184,8 @@ try {
 	<div class="card">
 		<h1>🔍 RamsesMcp Info Dashboard</h1>
 		<div class="status-box">
-			<p><strong>Stav autentizace:</strong> <span class="<?php echo $dbClass; ?>"><?php echo htmlspecialchars($dbStatus); ?></span></p>
+			<p><strong>Stav autentizace DB:</strong> <span class="<?php echo $dbClass; ?>"><?php echo htmlspecialchars($dbStatus); ?></span></p>
+			<p><strong>Stav Ollama API:</strong> <span class="<?php echo $ollamaClass; ?>"><?php echo $ollamaStatus; ?></span></p>
 			<p><strong>Server:</strong> <code><?php echo htmlspecialchars($config['db']['server'] ?? '---'); ?></code></p>
 			<p><strong>Databáze:</strong> <code><?php echo htmlspecialchars($config['db']['options']['Database'] ?? '---'); ?></code></p>
 			<p><strong>Verze MCP:</strong> <code><?php echo htmlspecialchars($config['mcp']['version'] ?? '---'); ?></code></p>

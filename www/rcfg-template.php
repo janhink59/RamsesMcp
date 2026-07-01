@@ -35,6 +35,7 @@ return [
 		 * - Pro intranet / subadresáře uveďte cestu s počátečním lomítkem (např.: '/ramses' nebo '/ramses/client1')
 		 */
 		'url_prefix'      => '/',
+		'ollama_url'      => 'http://localhost:11434',
 		
 		/**
 		 * Nastavení kontextu uživatele aplikace (info.php), ne každý má přístup ke všemu, k aplikaci se MCP server musí přihlásit.
